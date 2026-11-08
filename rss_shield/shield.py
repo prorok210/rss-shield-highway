@@ -1,14 +1,39 @@
 """RSS-distance safety filter (mask, TAKEOVER, lane-change supervision).
 
-Definition of admissibility (protocol R3.1, to be written into section 7.2 of v7):
-an action a chosen at decision tick t_k becomes active on [t_{k+1}, t_{k+2}) because of the
-FIFO delay; on [t_k, t_{k+1}) the already queued command acts. a is admissible if on every
-predicted physics frame of the horizon no RSS dangerous situation is created, i.e. there is
-no neighbour for which BOTH
+Definition of admissibility (protocol 7.2): an action a chosen at decision tick t_k becomes
+active on [t_{k+1}, t_{k+2}) because of the FIFO delay; on [t_k, t_{k+1}) the already queued
+command acts. a is admissible if on every predicted physics frame of the horizon no RSS
+dangerous situation is created, i.e. there is no neighbour for which BOTH
     longitudinal gap < d_min_long   and   lateral clearance < d_min_lat.
 Vehicles ahead are always checked; vehicles behind only in lanes the ego is entering.
 Horizon: 2 decision periods for lane keeping; 2 decision periods + LC_HORIZON for lane
 changes and while a maneuver is in progress.
+
+Queue consistency (protocol v11, 7.2). The lateral state used by the mask and by the
+supervision is the state at the activation moment of the command chosen now, i.e. after every
+command already waiting in the FIFO has left it (plan_state(): ghost run for k_tau frames
+without a new command). Consequences:
+  * a lane change that is queued but not yet active is a maneuver in progress: LANE_LEFT /
+    LANE_RIGHT are not offered again until it is completed (no second lane change before the
+    first one is active), and the other actions are checked with the lane-change horizon and
+    the vehicles behind in its target lane;
+  * the target lane of a new lane change is counted from the target lane after the queue;
+  * ABORT is offered only if the return becomes active before the lane marking is crossed:
+    the command chosen now leaves the FIFO after k_tau frames, so the check uses the maneuver
+    state at that moment, not the current one. The vehicle ignores an ABORT that arrives
+    after crossing (DelayedRSSVehicle.abort_ignored), protocol 7.4, item 3.
+
+Neighbour zone (protocol v11, 7.4). A neighbour is discarded before prediction only if an RSS
+violation with it is impossible on the horizon of N frames (necessary condition; complete for
+the prediction model below and the actual ego code: ego acceleration <= A_MAX_ACCEL, every
+predicted neighbour acceleration <= A_MAX_ACCEL, v >= 0):
+    ahead  (dx0 >= 0): violation possible only if  dx0 <= reach(v_ego, N)
+    behind (dx0 <  0): violation possible only if -dx0 <= reach(v_neighbour, N)
+    reach(v, N) = L + d_min_long(v + A_MAX_ACCEL*N*dt, 0, rho) + N*dt*v + A_MAX_ACCEL*dt^2*N(N-1)/2
+(dx0 - current centre distance; d_min_long grows with the rear speed and is largest for a
+standing front vehicle; the last two terms bound the distance the rear vehicle of the pair can
+gain in N frames). A fixed zone (ShieldConfig.zone) is accepted only if it is not smaller than
+reach(V_MAX, N_lc) for the longest horizon, V_MAX = highway-env Vehicle.MAX_SPEED.
 
 Neighbour prediction model (ShieldConfig):
   long_prediction = "nominal"    - vehicles in the ego's own lane keep their current speed.
@@ -25,20 +50,50 @@ Neighbour prediction model (ShieldConfig):
 
 Supervision of an ongoing maneuver (hierarchy of section 7.4), checked at every tick:
   if some action is admissible -> normal choice;
-  else (1) before crossing: ABORT if the return is admissible (origin lane leader AND rear);
+  else (1) before crossing (at the activation moment of the return): ABORT if the return is
+           admissible (origin lane leader AND rear);
        (2) TAKEOVER (brake, keep lateral target) if completion with braking is admissible;
        (4) FALLBACK: brake in [-8,-4] and hold the lane containing the ego centre.
 In lane keeping an empty safe set gives TAKEOVER. Takeover is released at the first tick
 with a non-empty safe set.
+
+Decision.intervention (TAKEOVER, ABORT, FALLBACK) marks a supervisory decision (intercept
+step, excluded from the exposure E); Decision.brake marks the commands that switch the vehicle
+to forced braking (TAKEOVER, FALLBACK). ABORT is an intervention without forced braking.
 """
 from dataclasses import dataclass, field
+from typing import Optional
 import numpy as np
 
 from .params import (DT, FRAMES_PER_DECISION, A_MAX_ACCEL, A_MAX_BRAKE, ACTIONS, ACTION_INDEX,
-                     TAKEOVER, ABORT, FALLBACK, LENGTH, WIDTH, LANE_WIDTH)
+                     TAKEOVER, ABORT, FALLBACK, SUPERVISORY, LENGTH, WIDTH, LANE_WIDTH, V_MAX)
 from .rss import d_min_long, d_min_lat
 
 V_LAT_OBS = 0.1   # m/s, lateral speed treated as an observed lane change
+
+
+def lc_frames_for(lc_horizon):
+    """Prediction horizon (physics frames) of lane changes and of an ongoing maneuver."""
+    return 2 * FRAMES_PER_DECISION + int(round(lc_horizon / DT))
+
+
+def path_bound(v, n):
+    """Upper bound of the distance covered in n frames from speed v >= 0 with acceleration
+    <= A_MAX_ACCEL (explicit Euler, position first, as in highway-env)."""
+    return n * DT * v + 0.5 * A_MAX_ACCEL * DT ** 2 * n * (n - 1)
+
+
+def reach(v, n, rho):
+    """Centre distance beyond which a pair cannot violate RSS within n frames.
+    v - current speed of the rear vehicle of the pair (ego for a neighbour ahead, the
+    neighbour for a vehicle behind)."""
+    v = max(0.0, float(v))
+    return LENGTH + d_min_long(v + A_MAX_ACCEL * n * DT, 0.0, rho) + path_bound(v, n)
+
+
+def complete_zone(rho, lc_horizon=2.0, v_max=V_MAX):
+    """Smallest fixed zone that is complete for all speeds <= v_max on the longest horizon."""
+    return reach(v_max, lc_frames_for(lc_horizon), rho)
 
 
 @dataclass
@@ -47,8 +102,17 @@ class ShieldConfig:
     long_prediction: str = "nominal"
     adjacent_lane_model: str = "occupancy"
     lc_horizon: float = 2.0
-    zone: float = 150.0          # longitudinal zone of considered vehicles, m
+    # None: per-vehicle complete radius reach() (default); a number: fixed radius, m, which must
+    # not be smaller than complete_zone(rho, lc_horizon) (v11: 150 m was incomplete)
+    zone: Optional[float] = None
     eps: float = 1e-9
+
+    def __post_init__(self):
+        if self.zone is not None:
+            need = complete_zone(self.rho, self.lc_horizon)
+            if self.zone < need - 1e-9:
+                raise ValueError(f"zone = {self.zone} m is incomplete: rho = {self.rho} s and "
+                                 f"v <= {V_MAX} m/s need >= {need:.3f} m (or zone=None)")
 
 
 @dataclass
@@ -57,10 +121,20 @@ class Decision:
     a_pi: object
     a_exec: object
     mask: np.ndarray
-    takeover: bool = False
+    takeover: bool = False        # legacy name: True for every supervisory decision
     fallback: bool = False
     reason: str = ""
     violations: dict = field(default_factory=dict)
+
+    @property
+    def intervention(self):
+        """Decision made by the supervisor (TAKEOVER / ABORT / FALLBACK): intercept step."""
+        return self.command in SUPERVISORY
+
+    @property
+    def brake(self):
+        """Command switches the vehicle to forced braking [-A_MAX_BRAKE, -A_MIN_BRAKE]."""
+        return self.command in (TAKEOVER, FALLBACK)
 
 
 class _NeighbourPrediction:
@@ -101,28 +175,59 @@ class RSSShield:
     def __init__(self, ego, cfg: ShieldConfig):
         self.ego = ego
         self.cfg = cfg
+        self.plan = None          # lateral state after the queue, set by mask()
+        self.filter_on = True     # False only in tests: disables the zone pre-filter
 
     # ------------------------------------------------------------- helpers
     @property
     def road(self):
         return self.ego.road
 
+    @property
+    def lc_frames(self):
+        return lc_frames_for(self.cfg.lc_horizon)
+
     def _lane_id(self, lane_index):
         return lane_index[2]
+
+    def _n_lanes(self):
+        return len(self.road.network.graph[self.ego.lane_index[0]][self.ego.lane_index[1]])
 
     def _lanes_overlapped(self, y):
         """Lane ids whose area intersects the ego body (straight road, lane i centred at 4*i)."""
         ids = set()
-        n_lanes = len(self.road.network.graph[self.ego.lane_index[0]][self.ego.lane_index[1]])
-        for i in range(n_lanes):
+        for i in range(self._n_lanes()):
             if abs(y - LANE_WIDTH * i) < LANE_WIDTH / 2 + WIDTH / 2 - 1e-6:
                 ids.add(i)
         return ids
 
-    def _others(self):
+    def _others(self, n_frames):
+        """Neighbours for which a violation within n_frames is possible (complete filter)."""
         x0 = self.ego.position[0]
-        return [v for v in self.road.vehicles
-                if v is not self.ego and abs(v.position[0] - x0) < self.cfg.zone]
+        others = [v for v in self.road.vehicles if v is not self.ego]
+        if not self.filter_on:
+            return others
+        if self.cfg.zone is not None:
+            return [v for v in others if abs(v.position[0] - x0) <= self.cfg.zone]
+        r_front = reach(self.ego.speed, n_frames, self.cfg.rho) + self.cfg.eps
+        out = []
+        for v in others:
+            dx = v.position[0] - x0
+            if dx >= 0:
+                if dx <= r_front:
+                    out.append(v)
+            elif -dx <= reach(v.speed, n_frames, self.cfg.rho) + self.cfg.eps:
+                out.append(v)
+        return out
+
+    def plan_state(self):
+        """Ego ghost at the activation moment of a command chosen now: every command already
+        in the FIFO has left it (k_tau frames), the new command has not acted yet."""
+        g = self.ego.ghost()
+        for _ in range(len(g.fifo)):
+            g.act()
+            g.step(DT)
+        return g
 
     def _simulate_ego(self, commands, n_frames):
         """Predict ego with the real vehicle code (FIFO + controller + limiter)."""
@@ -157,7 +262,7 @@ class RSSShield:
         ego_states = self._simulate_ego(commands, n_frames)
         lc_lanes = set(lc_lanes)
         preds = []
-        for o in self._others():
+        for o in self._others(n_frames):
             lane_o = self._lane_id(o.lane_index)
             vy = o.speed * np.sin(o.heading)
             moving = abs(vy) > V_LAT_OBS
@@ -209,28 +314,31 @@ class RSSShield:
         return viol
 
     # ------------------------------------------------------------- mask
-    def _lc_target(self, action):
-        lane = self._lane_id(self.ego.target_lane_index)
-        n_lanes = len(self.road.network.graph[self.ego.lane_index[0]][self.ego.lane_index[1]])
+    def _lc_target(self, action, lane):
+        """Target lane of a lane change counted from `lane` (target lane after the queue)."""
         if action == "LANE_LEFT":
             return lane - 1 if lane - 1 >= 0 else None
         if action == "LANE_RIGHT":
-            return lane + 1 if lane + 1 < n_lanes else None
+            return lane + 1 if lane + 1 < self._n_lanes() else None
         return None
 
     def mask(self):
-        ego = self.ego
         m = np.zeros(5, dtype=int)
         info = {}
-        lc_frames = 2 * FRAMES_PER_DECISION + int(round(self.cfg.lc_horizon / DT))
+        lc_frames = self.lc_frames
         keep_frames = 2 * FRAMES_PER_DECISION
-        man = ego.maneuver
+        g = self.plan_state()
+        man = g.maneuver                      # maneuver in progress after the queue
+        lane = self._lane_id(g.target_lane_index)
+        self.plan = dict(maneuver=None if man is None else dict(man), target_lane=lane,
+                         queued=[c for c in self.ego.fifo if c is not None])
         for idx, name in ACTIONS.items():
             if name in ("LANE_LEFT", "LANE_RIGHT"):
                 if man is not None:
-                    info[name] = {"busy": True}
+                    info[name] = {"busy": True, "maneuver": man["kind"],
+                                  "queued": self.ego.maneuver is None}
                     continue
-                tl = self._lc_target(name)
+                tl = self._lc_target(name, lane)
                 if tl is None:
                     info[name] = {"no_lane": True}
                     continue
@@ -247,7 +355,6 @@ class RSSShield:
 
     def decide(self, a_pi, q_values=None):
         """a_pi: unmasked policy choice (str). q_values: optional dict name->Q for argmax over A_safe."""
-        ego = self.ego
         m, info = self.mask()
         safe = [ACTIONS[i] for i in range(5) if m[i]]
         if safe:
@@ -258,17 +365,21 @@ class RSSShield:
             else:
                 a_exec = "IDLE" if "IDLE" in safe else safe[0]
             return Decision(a_exec, a_pi, a_exec, m, reason="safe", violations=info)
-        man = ego.maneuver
-        lc_frames = 2 * FRAMES_PER_DECISION + int(round(self.cfg.lc_horizon / DT))
+        man = self.plan["maneuver"]           # state at the activation moment of this decision
+        lc_frames = self.lc_frames
         if man is not None and man["kind"] in ("lane_change", "return"):
             origin = self._lane_id(man["origin"])
             target = self._lane_id(man["target"])
-            if not man["crossed"] and man["kind"] == "lane_change":
-                v = self.check_plan([ABORT], lc_frames, {origin})
-                info["ABORT"] = v
-                if not v:
-                    return Decision(ABORT, a_pi, None, m, takeover=True, reason="return",
-                                    violations=info)
+            if man["kind"] == "lane_change":
+                if man["crossed"]:
+                    # the return would become active after the marking is crossed (7.4, item 3)
+                    info["ABORT"] = {"after_crossing": True}
+                else:
+                    v = self.check_plan([ABORT], lc_frames, {origin})
+                    info["ABORT"] = v
+                    if not v:
+                        return Decision(ABORT, a_pi, None, m, takeover=True, reason="return",
+                                        violations=info)
             v = self.check_plan([TAKEOVER], lc_frames, {target})
             info["COMPLETE_BRAKE"] = v
             if not v:

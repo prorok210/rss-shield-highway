@@ -3,6 +3,17 @@
 Time convention: physics frame k covers [k*dt, (k+1)*dt). Columns t, a_ctrl, a refer to the
 frame start / the acceleration applied during the frame; *_end columns are the state at the
 end of the frame. Decision ticks are frames with k % 2 == 0 (t_k = 0.0, 0.2, ...).
+
+Status columns (protocol v11, 7.5): supervisory intervention, active command and forced
+braking are logged separately.
+  policy_step   - 1 on a decision frame whose command came from the policy (after the mask);
+  intervention  - 1 on both frames of a decision interval governed by a supervisory decision
+                  (TAKEOVER / ABORT / FALLBACK): intercept step, not part of the exposure E;
+  sup_cmd       - that supervisory command ("" otherwise);
+  active_cmd    - command that left the FIFO last (acts now); active_sup - it is supervisory;
+  brake_mode    - forced braking limiter [-8, -4] is on (TAKEOVER / FALLBACK active);
+  return_active - a return to the origin lane (after ABORT) is in progress;
+  abort_ignored - cumulative number of ABORT commands that arrived after crossing.
 """
 import csv
 import numpy as np
@@ -89,6 +100,7 @@ class Runner:
         self.rows = []
         self.t_contact = None
         self.last = dict(command="", a_pi="", a_exec="", mask="", reason="")
+        self.sup = ""                        # supervisory command of the current decision interval
 
     def run(self, T, stop=None, stop_after_crash=0.0):
         n = int(round(T / DT))
@@ -98,11 +110,14 @@ class Runner:
             t = round(k * DT, 10)
             tick = k % FRAMES_PER_DECISION == 0
             dec = None
+            policy_step = 0
             if tick:
                 dec = self.controller(k // FRAMES_PER_DECISION, t, self)
                 if dec["command"] is not None:
                     ego.act(dec["command"])
                 self.last = dec
+                self.sup = dec["command"] if dec["command"] in SUPERVISORY else ""
+                policy_step = int(dec["command"] is not None and not self.sup)
             v_start = float(ego.speed)
             pending = ego.pending
             self.road.act()
@@ -116,7 +131,10 @@ class Runner:
                        a_exec=(dec.get("a_exec") or "") if dec else "",
                        mask=_mask_str(dec.get("mask")) if dec else "",
                        reason=(dec.get("reason") or "") if dec else "",
-                       takeover=int(ego.takeover), fallback=int(ego.fallback),
+                       policy_step=policy_step, intervention=int(bool(self.sup)),
+                       sup_cmd=self.sup, active_sup=int(ego.sup_active),
+                       brake_mode=int(ego.brake_mode), return_active=int(ego.return_active),
+                       fallback=int(ego.fallback), abort_ignored=int(ego.abort_ignored),
                        a_ctrl=ego.a_ctrl, a=ego.a_applied, limiter_active=int(ego.limiter_active),
                        v_start=v_start, v_end=float(ego.speed),
                        a_integrated=(float(ego.speed) - v_start) / DT,

@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+  pull-requests: write
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -32,7 +36,7 @@ jobs:
         run: diff expected/table3.csv results/table3.csv
 
       - name: Check pytest summary
-        run: grep -q "67 passed" results/pytest.txt
+        run: grep -q "87 passed" results/pytest.txt
 
       - name: Check sim equivalence
         run: python -m pytest -q -p no:cacheprovider sim/test_fast_road.py
@@ -45,3 +49,18 @@ jobs:
           path: |
             results/
             logs/
+
+      # The full outputs of the 3.13 job are posted to the PR so that expected/ is refreshed from a
+      # real CI run (README, repository rules); the 3.14 job posts the comparison result only.
+      - name: Post results to the pull request
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+          PYV: ${{ matrix.python-version }}
+          SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if [ "$PYV" = "3.13" ]; then FULL=--full; else FULL=; fi
+          python tools/ci_comment.py verify "$PYV" "$SHA" $FULL > ci_comment.md
+          gh pr comment "$PR" --body-file ci_comment.md

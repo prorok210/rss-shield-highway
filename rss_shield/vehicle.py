@@ -13,7 +13,7 @@ import numpy as np
 from highway_env.vehicle.controller import MDPVehicle, ControlledVehicle
 
 from .params import (DT, K_TAU, A_MAX_ACCEL, A_MIN_BRAKE, A_MAX_BRAKE, TARGET_SPEEDS,
-                     TAKEOVER, ABORT, FALLBACK, MANEUVER_DONE_TOL, DELTA_V)
+                     TAKEOVER, ABORT, FALLBACK, SUPERVISORY, MANEUVER_DONE_TOL, DELTA_V)
 
 
 class DelayedRSSVehicle(MDPVehicle):
@@ -47,6 +47,7 @@ class DelayedRSSVehicle(MDPVehicle):
         self.maneuver = None                   # dict(origin, target, crossed, kind)
         self.limiter_active = False
         self.released_frame = None             # frame at which takeover was released
+        self.abort_ignored = 0                 # ABORT commands that arrived after crossing
 
     # ------------------------------------------------------------------ commands
     def act(self, action=None):
@@ -76,12 +77,17 @@ class DelayedRSSVehicle(MDPVehicle):
             MDPVehicle.act(self)
             return
         if cmd == ABORT:
-            # idempotent: a repeated ABORT during the return must not swap origin/target back
-            if self.maneuver is not None and self.maneuver["kind"] == "lane_change":
-                origin = self.maneuver["origin"]
-                self.maneuver = dict(origin=self.maneuver["target"], target=origin,
+            # idempotent: a repeated ABORT during the return must not swap origin/target back;
+            # after the marking is crossed the return is not executed (7.4, item 3): the lateral
+            # target is kept and the event is counted (the shield never issues such an ABORT)
+            m = self.maneuver
+            if m is not None and m["kind"] == "lane_change" and not m["crossed"]:
+                origin = m["origin"]
+                self.maneuver = dict(origin=m["target"], target=origin,
                                      crossed=False, kind="return")
                 self.target_lane_index = origin
+            elif m is not None and m["kind"] == "lane_change":
+                self.abort_ignored += 1
             MDPVehicle.act(self)
             return
         # ordinary meta-action
@@ -124,6 +130,22 @@ class DelayedRSSVehicle(MDPVehicle):
     @property
     def lateral_speed(self):
         return float(self.speed * np.sin(self.heading))
+
+    # status flags of the journal (protocol v11, 7.5): three different things
+    @property
+    def brake_mode(self):
+        """Forced braking limiter [-A_MAX_BRAKE, -A_MIN_BRAKE] is on (TAKEOVER / FALLBACK)."""
+        return bool(self.takeover)
+
+    @property
+    def sup_active(self):
+        """The active command (last one that left the FIFO) is supervisory."""
+        return self.active_cmd in SUPERVISORY
+
+    @property
+    def return_active(self):
+        """A return to the origin lane (after ABORT) is in progress."""
+        return self.maneuver is not None and self.maneuver["kind"] == "return"
 
     def ghost(self):
         """Light copy for prediction: shares road/network, copies all mutable state."""

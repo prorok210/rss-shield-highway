@@ -163,6 +163,81 @@ meas["T2b-iii"] += f"; контакт (R без реакции, 28 м/с): t = {
 r = S.scenario2b("i", model="occupancy"); r.write_csv(f"logs/{r.name}.csv")
 meas["T2b-occ"] = f"маска на такте 0: {''.join(map(str, r.decisions[0][2].mask))}; команды {cmds(r) or 'только IDLE'}"
 
+# ------------------------------------------------------------------ 5b. v11 review checks (Q1-Q4)
+from rss_shield.shield import RSSShield, ShieldConfig, complete_zone
+
+
+def first_frame(rows, cond):
+    return next((row["frame"] for row in rows if cond(row)), None)
+
+
+r = S.scenario_q1_double_lane_change(); r.write_csv(f"logs/{r.name}.csv")
+road, ego, sh = S.scenario_q1_scene()
+ego.act(sh.decide("LANE_RIGHT").command)
+for _ in range(2):
+    road.act(); road.step(0.1)
+v3 = sh.check_plan(["LANE_RIGHT"], sh.lc_frames, {3})["rear"]
+meas["Q1"] = (f"такт 1: LANE_RIGHT в очереди (активен с кадра {first_frame(r.rows, lambda row: row['active_cmd'] == 'LANE_RIGHT')}), "
+              f"маска {''.join(map(str, r.decisions[1][2].mask))}; команды {cmds(r)}; "
+              f"target_lane_index ∈ {sorted({int(row['target_lane_index']) for row in r.rows})}; итог y = {r.rows[-1]['y_end']:.3f}; "
+              f"проверка полосы 3 на такте 1: зазор сзади {v3['gap']:.3f} < {v3['d_min_long']:.3f} м (кадр {v3['frame']})")
+late = early = after = crashes = ignored = 0
+for case in S.Q2_LATE_ABORT_CASES:
+    rr = S.scenario_q2_abort_crossing(*case)
+    cr = first_frame(rr.rows, lambda row: row["lane_index"] == 2)
+    ac = first_frame(rr.rows, lambda row: row["active_cmd"] == ABORT)
+    late += int(ac is not None and cr is not None and ac > cr)
+    early += int(ac is not None and cr is None)
+    after += int(any(d.violations.get("ABORT") == {"after_crossing": True} for _, _, d in rr.decisions))
+    crashes += int(rr.t_contact is not None)
+    ignored += rr.ego.abort_ignored
+    if case == (10.0, 15.0, 0.0):
+        rr.write_csv(f"logs/{rr.name}.csv")
+r = S.scenario_q2_scripted_abort(); r.write_csv(f"logs/{r.name}.csv")
+meas["Q2"] = (f"{len(S.Q2_LATE_ABORT_CASES)} конфигураций: активаций ABORT после пересечения {late}; ABORT до пересечения "
+              f"(без пересечения) {early}; ABORT не предложен после пересечения (after_crossing) {after}; "
+              f"abort_ignored {ignored}; контактов {crashes}; без фильтра ABORT на 0.4 с: пересечение на кадре "
+              f"{first_frame(r.rows, lambda row: row['lane_index'] == 2)}, активация на кадре "
+              f"{first_frame(r.rows, lambda row: row['active_cmd'] == ABORT)}, abort_ignored = {r.ego.abort_ignored}, "
+              f"итог полоса {r.rows[-1]['lane_index']}")
+road, ego, sh = S.scenario_q3_far_leader()
+m0, i0 = sh.mask()
+ego.act("IDLE")
+for _ in range(2):
+    road.act(); road.step(0.1)
+m1, i1 = sh.mask()
+n_eq = n_sc = dropped = 0
+for rho in (0.1, 0.4, 1.0):
+    for seed in range(12):
+        road, ego = S.scenario_q3_random(seed, ticks=1 + seed % 2)
+        full = RSSShield(ego, ShieldConfig(rho=rho)); full.filter_on = False
+        filt = RSSShield(ego, ShieldConfig(rho=rho))
+        same = True
+        for a_pi in ("LANE_LEFT", "FASTER"):
+            d_full, d_filt = full.decide(a_pi), filt.decide(a_pi)
+            same &= (list(d_full.mask) == list(d_filt.mask) and d_full.command == d_filt.command
+                     and d_full.violations == d_filt.violations)
+        n_eq += int(same); n_sc += 1
+        dropped += len(road.vehicles) - 1 - len(filt._others(filt.lc_frames))
+try:
+    ShieldConfig(rho=1.0, zone=150.0)
+    z150 = "принята"
+except ValueError:
+    z150 = "отклонена"
+meas["Q3"] = (f"такт 0: маска {''.join(map(str, m0))}, IDLE: кадр {i0['IDLE']['front']['frame']}, зазор "
+              f"{i0['IDLE']['front']['gap']:.3f} < {i0['IDLE']['front']['d_min_long']:.3f} м; после IDLE такт 1: маска "
+              f"{''.join(map(str, m1))}, кадр {i1['IDLE']['front']['frame']}, зазор {i1['IDLE']['front']['gap']:.3f} м; "
+              f"zone = 150 м {z150} (полная зона при ρ = 1.0: {complete_zone(1.0):.3f} м); фильтр = полная проверка в "
+              f"{n_eq} из {n_sc} случайных сцен, отброшено {dropped} ТС")
+r = S.scenario2b("i", model="observed")
+r1a = S.scenario1A(0.4, "sync")
+meas["Q4"] = (f"2b-i: intervention = 1 на кадрах {[row['frame'] for row in r.rows if row['intervention']]}, "
+              f"ABORT активен на кадрах {[row['frame'] for row in r.rows if row['active_cmd'] == ABORT]} "
+              f"(active_sup = 1, brake_mode = {max(row['brake_mode'] for row in r.rows if row['active_cmd'] == ABORT)}), "
+              f"return_active на кадрах {first_frame(r.rows, lambda row: row['return_active'])}–"
+              f"{max(row['frame'] for row in r.rows if row['return_active'])}; 1A sync: brake_mode = 1 с кадра "
+              f"{first_frame(r1a.rows, lambda row: row['brake_mode'])}")
+
 with open("results/scenario2_setup.md", "w") as fh:
     fh.write("# Начальные условия сценария 2 (для R1.7). Дорога: 4 полосы, ширина 4 м, центр полосы i: y = 4i.\n\n")
     g = d_min_long(28.0, 20.0, 0.4) + 1.0
@@ -208,6 +283,15 @@ rows3 += [
     ["T2b-i", "2b-i", 0.4, "ABORT на такте 2 (t = 0.4 с), возврат target на кадре 6", "точное", meas["T2b-i"], verdict(r"^test_T2b_i_")],
     ["T2b-iii", "2b-iii", 0.4, "FALLBACK на такте 2, флаг fallback с кадра 6", "точное", meas["T2b-iii"], verdict(r"^test_T2b_iii")],
     ["T2b-occ", "2b, модель occupancy", 0.4, "LANE_RIGHT запрещён на такте 0", "точное", meas["T2b-occ"], verdict(r"^test_T2b_occ")],
+    ["Q1", "Повторная смена полосы до активации предыдущей", 0.4,
+     "такт 1: LANE_LEFT/LANE_RIGHT = 0 (манёвр в очереди), цель не дальше полосы 2", "точное", meas["Q1"], verdict(r"^test_Q1")],
+    ["Q2", "Пересечение разметки за время ожидания ABORT", 0.4,
+     "нет активации ABORT после пересечения; после пересечения полоса сохраняется", "точное", meas["Q2"], verdict(r"^test_Q2")],
+    ["Q3", "Полнота зоны проверки соседей", "0.1/0.4/1.0",
+     "лидер v = 0 в 173 м при 30 м/с: IDLE запрещён (кадр 1: 164 < 167.625 м); фильтр = полная проверка", "точное",
+     meas["Q3"], verdict(r"^test_Q3")],
+    ["Q4", "Статусы журнала", 0.4, "intervention, active_sup, brake_mode, return_active разведены", "точное",
+     meas["Q4"], verdict(r"^test_Q4")],
     ["E1–E3", "Интеграция с HighwayEnv.step()", 0.4, "задержка и ограничитель внутри _simulate()", "1e−9", "см. results/pytest.txt", verdict(r"^test_E\d")],
     ["R0", "Формулы RSS", "—", "43.4638 / 47.9175 / 56.9825 / 93.02; d_lat(0,0,0.4) = 0.86", "5e−3", "см. results/pytest.txt", verdict(r"^test_R0")],
     ["P0", "Профиль манёвра highway-env", "—", "описательно", "—", meas["P0"], verdict(r"^test_P0")],
