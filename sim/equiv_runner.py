@@ -1,14 +1,16 @@
 """Run fixed scenarios with the original (mode=orig) or accelerated (mode=fast) highway-env and
-write a digest of the full state of every vehicle after every physics frame + obs/reward per step."""
+write a digest of the full state of every vehicle after every physics frame + obs/reward per step.
+Scenarios "gen" and "shield" use the main traffic generator of the protocol (section 7.6,
+experiments/generator.py): the frames of reset() (warm-up without the ego, insertion) are hashed
+too, the recycling of the window runs inside step()."""
 import os, sys, json, hashlib, time
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path[:0] = [HERE, os.path.dirname(HERE)]   # sim/ and the repo root (rss_shield)
+sys.path[:0] = [HERE, os.path.dirname(HERE)]   # sim/ and the repo root (rss_shield, experiments)
 import numpy as np
-import gymnasium as gym
 import highway_env  # noqa
 from highway_env.road.road import Road
 import fast_road
-from window_env import WindowEnv
+from experiments.generator import ProtocolHighwayEnv
 from rss_shield.shield import RSSShield, ShieldConfig
 from rss_shield.params import ACTIONS
 
@@ -36,43 +38,45 @@ def _hashed_step(self, dt):
 
 Road.step = _hashed_step
 res, t0 = [], time.time()
-# (kind, D or N, episodes, steps)
+# (kind, D or N, episodes, steps); gen/shield: main generator, D vehicles per km and lane
 # termination is ignored: simulation continues after crashes (more interactions per run)
-plan = [("win", 10, 6, 150), ("win", 25, 4, 120), ("win", 40, 3, 100), ("std", 100, 3, 100),
+plan = [("gen", 10, 6, 150), ("gen", 25, 4, 120), ("gen", 40, 3, 100), ("std", 100, 3, 100),
         ("std", 160, 2, 60), ("shield", 10, 2, 100), ("shield", 25, 2, 100), ("shield", 40, 2, 100)]
 if quick:
-    plan = [("win", 10, 2, 100), ("win", 25, 1, 80), ("win", 40, 1, 60), ("std", 100, 1, 60),
+    plan = [("gen", 10, 2, 100), ("gen", 25, 1, 80), ("gen", 40, 1, 60), ("std", 100, 1, 60),
             ("shield", 25, 1, 60)]
 for kind, p, n_ep, n_st in plan:
     for ep in range(n_ep):
-        if kind in ("win", "shield"):
-            env = WindowEnv(config={"D": p})
+        if kind in ("gen", "shield"):
+            env = ProtocolHighwayEnv(config={"D": p})
         else:
+            import gymnasium as gym
             env = gym.make("highway-v0", config={"lanes_count": 4, "vehicles_count": p - 1,
                            "vehicles_density": 3.0, "simulation_frequency": 10, "policy_frequency": 5,
                            "duration": 10000, "observation": {"type": "Kinematics", "vehicles_count": 15,
                            "see_behind": True}}).unwrapped
         seed = 1000 * p + ep
+        FR.clear()                     # frames of reset() are compared as well
         obs, _ = env.reset(seed=seed)
+        reset_frames = len(FR)
         rng = np.random.default_rng(seed)
         shield = RSSShield(env.vehicle, ShieldConfig(rho=0.6)) if kind == "shield" else None
-        n_takeover = 0
-        FR.clear()
+        n_int = 0
         steps, sh = 0, hashlib.sha256(obs.tobytes())
-        bg_crash = 0
         for k in range(n_st):
             a = int(rng.choice(5, p=[0.2, 0.15, 0.4, 0.15, 0.1]))
             if shield is not None:
                 d = shield.decide(ACTIONS[a])
                 a = d.command
-                n_takeover += bool(d.takeover)
-                sh.update(repr((d.command, d.mask.tolist() if hasattr(d, "mask") else None)).encode())
+                n_int += bool(d.intervention)
+                sh.update(repr((d.command, d.mask.tolist())).encode())
             obs, r, term, trunc, info = env.step(a)
             sh.update(obs.tobytes()); sh.update(np.float64(r).tobytes())
             steps += 1
-        bg_crash = sum(bool(v.crashed) for v in env.road.vehicles[1:])
-        res.append(dict(kind=kind, p=p, ep=ep, steps=steps, takeovers=n_takeover, frames=len(FR), n_veh=len(env.road.vehicles),
-                        bg_crashed=bg_crash, ego_crashed=bool(env.vehicle.crashed),
+        bg_crash = sum(bool(v.crashed) for v in env.road.vehicles if v is not env.vehicle)
+        res.append(dict(kind=kind, p=p, ep=ep, steps=steps, interventions=n_int, reset_frames=reset_frames,
+                        frames=len(FR), n_veh=len(env.road.vehicles), bg_crashed=bg_crash,
+                        ego_crashed=bool(env.vehicle.crashed),
                         frames_digest=hashlib.sha256("".join(FR).encode()).hexdigest()[:16],
                         frame_list=list(FR), steps_digest=sh.hexdigest()[:16]))
         env.close()

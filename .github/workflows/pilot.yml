@@ -1,0 +1,72 @@
+name: pilot
+
+# Short end-to-end pilot of the training chain (protocol v11, section 8): experiment tests, step
+# time of the main generator with fast_road, pilot run; report.md is posted to the pull request.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "experiments/**"
+      - "rss_shield/**"
+      - "sim/**"
+      - "requirements.txt"
+      - "tools/ci_comment.py"
+      - ".github/workflows/pilot.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      OMP_NUM_THREADS: "1"
+      MKL_NUM_THREADS: "1"
+      OPENBLAS_NUM_THREADS: "1"
+      VECLIB_MAXIMUM_THREADS: "1"
+      PYTHONHASHSEED: "0"
+      PR_HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          mkdir -p runs/pilot_ci
+
+      - name: Step time of the main generator (fast_road)
+        run: python sim/bench.py fast 40 2>&1 | tee runs/pilot_ci/bench.txt
+
+      - name: Experiment tests
+        run: python -m pytest -q -p no:cacheprovider experiments/tests 2>&1 | tee runs/pilot_ci/tests.txt
+
+      - name: Pilot
+        run: python -m experiments.pilot --out runs/pilot_ci 2>&1 | tee runs/pilot_ci/pilot_log.txt
+
+      - name: Upload pilot outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pilot
+          path: runs/pilot_ci/
+
+      - name: Post the pilot report to the pull request
+        if: always() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          python tools/ci_comment.py pilot 3.13 "$PR_HEAD_SHA" runs/pilot_ci > pilot_comment.md
+          gh pr comment "$PR" --body-file pilot_comment.md
