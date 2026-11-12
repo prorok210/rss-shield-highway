@@ -13,7 +13,7 @@ def _check_limits(rows):
         assert abs(row["a_integrated"] - a) < TOL, row                  # kinematics = applied a
         assert v1 >= -TOL, row                                           # no reversing
         assert -A_MAX_BRAKE - TOL <= a <= A_MAX_ACCEL + TOL, row
-        if row["takeover"]:
+        if row["brake_mode"]:
             stopping = v1 <= TOL and a == pytest.approx(-v0 / DT)
             assert a <= -A_MIN_BRAKE + TOL or stopping, row
 

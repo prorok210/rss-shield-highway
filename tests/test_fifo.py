@@ -54,9 +54,9 @@ def test_F4_takeover_uses_same_queue_and_delay():
     assert first == 2 * 1 + K_TAU
     for row in r.rows:
         if row["frame"] < first:
-            assert row["takeover"] == 0 and row["a"] > -A_MIN_BRAKE
+            assert row["brake_mode"] == 0 and row["a"] > -A_MIN_BRAKE
         else:
-            assert row["takeover"] == 1 and row["a"] == pytest.approx(-A_MIN_BRAKE)
+            assert row["brake_mode"] == 1 and row["a"] == pytest.approx(-A_MIN_BRAKE)
 
 
 def test_F5_release_policy_command_arrives_after_tau():
@@ -65,9 +65,9 @@ def test_F5_release_policy_command_arrives_after_tau():
     f_rel = 2 * rel + K_TAU
     for row in r.rows:
         if row["frame"] in (2 * rel, 2 * rel + 1):          # release tick: TAKEOVER still queued
-            assert row["takeover"] == 1 and row["active_cmd"] == TAKEOVER
+            assert row["brake_mode"] == 1 and row["active_cmd"] == TAKEOVER
         if row["frame"] >= f_rel:
-            assert row["takeover"] == 0 and row["active_cmd"] == "IDLE"
+            assert row["brake_mode"] == 0 and row["active_cmd"] == "IDLE"
     assert (f_rel, "IDLE") in act
 
 

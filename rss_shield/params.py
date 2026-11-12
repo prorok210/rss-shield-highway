@@ -22,6 +22,7 @@ DELTA_V = 5.0
 LENGTH = 5.0             # highway-env Vehicle.LENGTH
 WIDTH = 2.0              # highway-env Vehicle.WIDTH
 LANE_WIDTH = 4.0
+V_MAX = 40.0             # highway-env Vehicle.MAX_SPEED: upper bound of every vehicle speed, m/s (zone, 7.4)
 
 ACTIONS = {0: "LANE_LEFT", 1: "IDLE", 2: "LANE_RIGHT", 3: "FASTER", 4: "SLOWER"}
 ACTION_INDEX = {v: k for k, v in ACTIONS.items()}

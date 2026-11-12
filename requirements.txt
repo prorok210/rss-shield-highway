@@ -1,5 +1,7 @@
-# Exact versions used to build and check the package (table 1 of the protocol).
+# Exact versions (table 1 of the protocol): highway-env, gymnasium.
+# Minimum versions: numpy, pytest, scipy (scipy is used by analysis/ only).
 highway-env==1.12.1
 gymnasium==1.4.0
 numpy>=2.0
 pytest>=8.0
+scipy>=1.11

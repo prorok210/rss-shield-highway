@@ -3,13 +3,31 @@
 Time convention: physics frame k covers [k*dt, (k+1)*dt). Columns t, a_ctrl, a refer to the
 frame start / the acceleration applied during the frame; *_end columns are the state at the
 end of the frame. Decision ticks are frames with k % 2 == 0 (t_k = 0.0, 0.2, ...).
+
+Status columns (protocol 7.5): supervisory intervention, active command and forced
+braking are logged separately. The decision set is defined once, in rss_shield.accounting.
+  intervention  - 1 on both frames of a decision interval governed by a supervisory decision
+                  (TAKEOVER / ABORT / FALLBACK): intercept step, not part of the exposure E;
+  policy_step   - 1 on both frames of every other decision interval (policy command after the
+                  mask, or no new command): a policy step, part of the exposure E;
+                  both flags are set per decision interval (by the decision tick), and
+                  policy_step + intervention = 1 on every frame;
+  sup_cmd       - that supervisory command ("" otherwise);
+  active_cmd    - command that left the FIFO last (acts now); active_sup - it is supervisory;
+  brake_mode    - forced braking limiter [-8, -4] is on (TAKEOVER / FALLBACK active);
+  return_active - a return to the origin lane (after ABORT) is in progress;
+  abort_ignored - cumulative number of ABORT commands that started no return (after the
+                  crossing, or without a lane change to return from).
+There is no `takeover` column: Decision.takeover is a deprecated alias of Decision.intervention.
 """
 import csv
 import numpy as np
 from highway_env.road.road import Road, RoadNetwork
 
-from .params import DT, FRAMES_PER_DECISION, LENGTH, WIDTH, ACTION_INDEX, SUPERVISORY
+from .accounting import INTERVENTION, step_kind
+from .params import DT, FRAMES_PER_DECISION, K_TAU, LENGTH, WIDTH, ACTION_INDEX, SUPERVISORY
 from .rss import d_min_long, d_min_lat
+from .shield import lateral_danger
 from .vehicle import DelayedRSSVehicle, ScriptedVehicle
 
 
@@ -22,10 +40,10 @@ def lane(road, i):
     return road.network.get_lane(("0", "1", i))
 
 
-def add_ego(road, lane_id, x, v, target_speed=None, initial_active=None):
+def add_ego(road, lane_id, x, v, target_speed=None, initial_active=None, k_tau=K_TAU):
     ln = lane(road, lane_id)
     ego = DelayedRSSVehicle(road, ln.position(x, 0.0), heading=ln.heading_at(x), speed=v,
-                            target_speed=target_speed, initial_active=initial_active)
+                            target_speed=target_speed, initial_active=initial_active, k_tau=k_tau)
     if target_speed is not None:
         ego.speed_index = int(np.argmin(np.abs(ego.target_speeds - target_speed)))
         ego.target_speed = float(ego.target_speeds[ego.speed_index])
@@ -45,7 +63,9 @@ def add_scripted(road, lane_id, x, v, name, accel=None, lane_change=None, rss_fo
 
 
 def _danger(ego, others, rho):
-    """Actual RSS quantities at the end of a frame (nearest front / rear / lateral)."""
+    """Actual RSS quantities at the end of a frame (nearest front / rear / lateral). danger: both
+    thresholds violated, the lateral one with the operational condition of protocol 7.7
+    (lateral overlap or lateral approach, shield.lateral_danger)."""
     out = dict(gap_front=np.nan, d_min_long_front=np.nan, gap_rear=np.nan,
                d_min_long_rear=np.nan, side_min=np.nan, d_min_lat_min=np.nan,
                danger=False, danger_with="")
@@ -69,7 +89,8 @@ def _danger(ego, others, rho):
             best_r = (gap, need)
         if abs(dx) < 50 and (best_s is None or side < best_s[0]):
             best_s = (side, dlat)
-        if gap < need and side < dlat:
+        # lateral part as in the filter and t_danger (protocol 7.7): overlap or lateral approach
+        if gap < need and side < dlat and lateral_danger(side, (vye - vyo) * sgn):
             out["danger"] = True
             out["danger_with"] += getattr(o, "name", "?") + ("F" if dx >= 0 else "R") + ";"
     if best_f:
@@ -82,13 +103,15 @@ def _danger(ego, others, rho):
 
 
 class Runner:
-    """controller(tick, t, runner) -> dict(command, a_pi, a_exec, mask, takeover, fallback, reason)."""
+    """controller(tick, t, runner) -> dict(command, a_pi, a_exec, mask, reason)."""
 
     def __init__(self, road, ego, controller, rho, name="run"):
         self.road, self.ego, self.controller, self.rho, self.name = road, ego, controller, rho, name
         self.rows = []
         self.t_contact = None
         self.last = dict(command="", a_pi="", a_exec="", mask="", reason="")
+        self.sup = ""                        # supervisory command of the current decision interval
+        self.pol = 1                         # 1 if the current decision interval is a policy step
 
     def run(self, T, stop=None, stop_after_crash=0.0):
         n = int(round(T / DT))
@@ -103,6 +126,8 @@ class Runner:
                 if dec["command"] is not None:
                     ego.act(dec["command"])
                 self.last = dec
+                self.sup = dec["command"] if step_kind(dec["command"]) == INTERVENTION else ""
+                self.pol = int(not self.sup)
             v_start = float(ego.speed)
             pending = ego.pending
             self.road.act()
@@ -116,7 +141,10 @@ class Runner:
                        a_exec=(dec.get("a_exec") or "") if dec else "",
                        mask=_mask_str(dec.get("mask")) if dec else "",
                        reason=(dec.get("reason") or "") if dec else "",
-                       takeover=int(ego.takeover), fallback=int(ego.fallback),
+                       policy_step=self.pol, intervention=int(bool(self.sup)),
+                       sup_cmd=self.sup, active_sup=int(ego.sup_active),
+                       brake_mode=int(ego.brake_mode), return_active=int(ego.return_active),
+                       fallback=int(ego.fallback), abort_ignored=int(ego.abort_ignored),
                        a_ctrl=ego.a_ctrl, a=ego.a_applied, limiter_active=int(ego.limiter_active),
                        v_start=v_start, v_end=float(ego.speed),
                        a_integrated=(float(ego.speed) - v_start) / DT,

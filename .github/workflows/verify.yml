@@ -6,6 +6,9 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -32,7 +35,7 @@ jobs:
         run: diff expected/table3.csv results/table3.csv
 
       - name: Check pytest summary
-        run: grep -q "67 passed" results/pytest.txt
+        run: test "$(grep -o "[0-9]* passed" results/pytest.txt)" = "$(grep -o "[0-9]* passed" expected/pytest.txt)"
 
       - name: Check sim equivalence
         run: python -m pytest -q -p no:cacheprovider sim/test_fast_road.py

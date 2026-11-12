@@ -1,0 +1,338 @@
+journal: {
+ "machine": "modal",
+ "os": "Linux-4.19.0-gvisor-x86_64-with-glibc2.39",
+ "cpu": "unknown",
+ "cores": 4,
+ "python": "3.12.3",
+ "numpy": "2.5.4",
+ "highway-env": "1.12.1",
+ "gymnasium": "1.4.0",
+ "commit (HEAD)": "961bd2accca865fe4554f7984abd4298d665726c",
+ "PR head": "",
+ "fast_road": "enabled",
+ "OMP_NUM_THREADS": "1",
+ "MKL_NUM_THREADS": "1",
+ "OPENBLAS_NUM_THREADS": "1",
+ "VECLIB_MAXIMUM_THREADS": "1"
+}
+[1/10] start states and warm-up check
+  warm-up: {
+ "n": 20,
+ "v10_15": 10.049569632526657,
+ "v15_20": 10.131198713351372,
+ "pooled": 0.008122644432505134,
+ "max_seed": 0.02345871436413304,
+ "n_seed_ok": 19,
+ "passed": true
+}
+[2/10] training (Proposed)
+  Proposed episode   0 seed 900040 steps 200 policy 200 intercept  0 crash 0 return   17.50 | total   200 eps 0.991 buffer   200 loss —
+  Proposed episode   1 seed 900041 steps 200 policy 200 intercept  0 crash 0 return   38.70 | total   400 eps 0.981 buffer   400 loss —
+  Proposed episode   2 seed 900042 steps 200 policy 200 intercept  0 crash 0 return   16.28 | total   600 eps 0.972 buffer   600 loss —
+  Proposed episode   3 seed 900043 steps 200 policy 200 intercept  0 crash 0 return   19.82 | total   800 eps 0.962 buffer   800 loss —
+  Proposed episode   4 seed 900044 steps 200 policy 199 intercept  1 crash 0 return   17.06 | total  1000 eps 0.953 buffer   999 loss 0.0246
+  Proposed episode   5 seed 900045 steps 200 policy 199 intercept  1 crash 0 return   42.78 | total  1200 eps 0.943 buffer  1198 loss 0.0009
+  Proposed episode   6 seed 900046 steps 200 policy 200 intercept  0 crash 0 return    8.69 | total  1400 eps 0.933 buffer  1398 loss 0.0002
+  Proposed episode   7 seed 900047 steps 200 policy 200 intercept  0 crash 0 return   10.79 | total  1600 eps 0.924 buffer  1598 loss 0.0002
+  Proposed episode   8 seed 900048 steps 200 policy 200 intercept  0 crash 0 return   22.14 | total  1800 eps 0.914 buffer  1798 loss 0.0001
+  Proposed episode   9 seed 900049 steps 200 policy 199 intercept  1 crash 0 return   29.01 | total  2000 eps 0.905 buffer  1997 loss 0.0002
+  Proposed episode  10 seed 900050 steps 200 policy 198 intercept  2 crash 0 return   63.55 | total  2200 eps 0.895 buffer  2195 loss 0.0003
+  Proposed episode  11 seed 900051 steps 200 policy 200 intercept  0 crash 0 return   31.66 | total  2400 eps 0.886 buffer  2395 loss 0.0005
+  Proposed episode  12 seed 900052 steps 200 policy 200 intercept  0 crash 0 return   48.87 | total  2600 eps 0.877 buffer  2595 loss 0.0003
+  Proposed episode  13 seed 900053 steps 200 policy 200 intercept  0 crash 0 return   44.65 | total  2800 eps 0.867 buffer  2795 loss 0.0001
+  Proposed episode  14 seed 900054 steps 200 policy 199 intercept  1 crash 0 return   52.50 | total  3000 eps 0.858 buffer  2994 loss 0.0003
+  filter of the training episodes: observed/nominal/approach/zone=reach (MAIN_SERIES: True)
+[3/10] replay records
+  check: {
+ "bad": {
+  "start": 0,
+  "inner": 0,
+  "next": 0
+ },
+ "max_dR": 0.0,
+ "hist": {
+  "1": 2989,
+  "2": 4,
+  "3": 1
+ },
+ "d1": 0,
+ "d1_multi": 0,
+ "inner_cmds": {
+  "TAKEOVER": 5,
+  "FALLBACK": 1
+ }
+}
+[4/10] save / load
+  {
+ "path": "runs/pilot_run/model.npz",
+ "size": 2867226,
+ "n_states": 256,
+ "dq": 0.0,
+ "dqt": 0.0,
+ "same_greedy": true,
+ "steps": 3000,
+ "updates": 2001
+}
+[5/10] evaluation of the loaded model
+  totals: {
+ "episodes": 10,
+ "steps": 2000,
+ "E": 1999,
+ "intercept": 1,
+ "takeover": 1,
+ "abort": 0,
+ "fallback": 0,
+ "N_att": 0,
+ "N_blocked": 0,
+ "BLCR": null,
+ "N_busy": 0,
+ "N_no_lane": 0,
+ "N_att_rss": 0,
+ "N_blocked_rss": 0,
+ "BLCR_rss": null,
+ "N_att_int": 0,
+ "N_exec": 0,
+ "N_exec_int": 0,
+ "N_exec_other": 0,
+ "masked": 368,
+ "R_int": 0.1845,
+ "crashes": 0,
+ "CR": 0.0,
+ "crash_intercept": 0,
+ "crash_sup_active": 0,
+ "crash_rear": 0,
+ "completed": 10,
+ "abort_ignored": 0,
+ "ttc_pen": 0.0,
+ "col_pen": 0.0,
+ "v_eff": 17.664435729620166,
+ "jerk_rms": 31.76840962674393,
+ "jerk_rms_smooth": 5.240818429606451,
+ "jerk_jump_share": 0.9308836955855613,
+ "jerk_jumps": 697,
+ "frames": 4000,
+ "shield_cfg": "observed/nominal/approach/zone=reach",
+ "main_series": true
+}
+[6/10] Baselines 1 / 2 and mode A
+  Baseline 1 episode   0 seed 900040 steps  14 policy  14 intercept  0 crash 1 return    4.14 | total    14 eps 0.999 buffer    14 loss —
+  Baseline 1 episode   1 seed 900041 steps  28 policy  28 intercept  0 crash 1 return   12.29 | total    42 eps 0.998 buffer    42 loss —
+  Baseline 1 episode   2 seed 900042 steps  49 policy  49 intercept  0 crash 1 return   23.51 | total    91 eps 0.996 buffer    91 loss —
+  Baseline 1 episode   3 seed 900043 steps  12 policy  12 intercept  0 crash 1 return    4.00 | total   103 eps 0.995 buffer   103 loss —
+  Baseline 1 episode   4 seed 900044 steps  27 policy  27 intercept  0 crash 1 return    8.22 | total   130 eps 0.994 buffer   130 loss —
+  Baseline 1 episode   5 seed 900045 steps   9 policy   9 intercept  0 crash 1 return    3.89 | total   139 eps 0.993 buffer   139 loss —
+  Baseline 1 episode   6 seed 900046 steps   4 policy   4 intercept  0 crash 1 return    2.05 | total   143 eps 0.993 buffer   143 loss —
+  Baseline 1 episode   7 seed 900047 steps  14 policy  14 intercept  0 crash 1 return    6.14 | total   157 eps 0.993 buffer   157 loss —
+  Baseline 1 episode   8 seed 900048 steps  28 policy  28 intercept  0 crash 1 return   19.56 | total   185 eps 0.991 buffer   185 loss —
+  Baseline 1 episode   9 seed 900049 steps  67 policy  67 intercept  0 crash 1 return   21.00 | total   252 eps 0.988 buffer   252 loss —
+  Baseline 1 episode  10 seed 900050 steps  23 policy  23 intercept  0 crash 1 return   10.81 | total   275 eps 0.987 buffer   275 loss —
+  Baseline 1 episode  11 seed 900051 steps  13 policy  13 intercept  0 crash 1 return    5.80 | total   288 eps 0.986 buffer   288 loss —
+  Baseline 1 episode  12 seed 900052 steps 172 policy 172 intercept  0 crash 1 return   85.51 | total   460 eps 0.978 buffer   460 loss —
+  Baseline 1 episode  13 seed 900053 steps  24 policy  24 intercept  0 crash 1 return   10.73 | total   484 eps 0.977 buffer   484 loss —
+  Baseline 1 episode  14 seed 900054 steps  12 policy  12 intercept  0 crash 1 return    5.51 | total   496 eps 0.976 buffer   496 loss —
+  Baseline 1 episode  15 seed 900055 steps   7 policy   7 intercept  0 crash 1 return    3.08 | total   503 eps 0.976 buffer   503 loss 0.1028
+  Baseline 1 episode  16 seed 900056 steps  68 policy  68 intercept  0 crash 1 return   10.25 | total   571 eps 0.973 buffer   571 loss 0.0040
+  Baseline 1 episode  17 seed 900057 steps  35 policy  35 intercept  0 crash 1 return   23.75 | total   606 eps 0.971 buffer   606 loss 0.0014
+  Baseline 1 episode  18 seed 900058 steps  23 policy  23 intercept  0 crash 1 return    9.98 | total   629 eps 0.970 buffer   629 loss 0.0010
+  Baseline 1 episode  19 seed 900059 steps  10 policy  10 intercept  0 crash 1 return    4.26 | total   639 eps 0.970 buffer   639 loss 0.0009
+  Baseline 1 episode  20 seed 900060 steps  44 policy  44 intercept  0 crash 1 return   18.56 | total   683 eps 0.968 buffer   683 loss 0.0005
+  Baseline 1 episode  21 seed 900061 steps  18 policy  18 intercept  0 crash 1 return    6.35 | total   701 eps 0.967 buffer   701 loss 0.0006
+  Baseline 1 episode  22 seed 900062 steps  33 policy  33 intercept  0 crash 1 return   22.49 | total   734 eps 0.965 buffer   734 loss 0.0004
+  Baseline 1 episode  23 seed 900063 steps   8 policy   8 intercept  0 crash 1 return    3.39 | total   742 eps 0.965 buffer   742 loss 0.0003
+  Baseline 1 episode  24 seed 900064 steps  41 policy  41 intercept  0 crash 1 return   26.87 | total   783 eps 0.963 buffer   783 loss 0.0004
+  Baseline 1 episode  25 seed 900065 steps  13 policy  13 intercept  0 crash 1 return    5.68 | total   796 eps 0.962 buffer   796 loss 0.0003
+  Baseline 1 episode  26 seed 900066 steps  69 policy  69 intercept  0 crash 1 return   17.76 | total   865 eps 0.959 buffer   865 loss 0.0003
+  Baseline 1 episode  27 seed 900067 steps  83 policy  83 intercept  0 crash 1 return   13.15 | total   948 eps 0.955 buffer   948 loss 0.0002
+  Baseline 1 episode  28 seed 900068 steps  12 policy  12 intercept  0 crash 1 return    4.57 | total   960 eps 0.954 buffer   960 loss 0.0002
+  Baseline 1 episode  29 seed 900069 steps  18 policy  18 intercept  0 crash 1 return    7.29 | total   978 eps 0.954 buffer   978 loss 0.0005
+  Baseline 1 episode  30 seed 900070 steps 103 policy 103 intercept  0 crash 1 return   14.37 | total  1081 eps 0.949 buffer  1081 loss 0.0022
+  Baseline 1 episode  31 seed 900071 steps  34 policy  34 intercept  0 crash 1 return   13.64 | total  1115 eps 0.947 buffer  1115 loss 0.0050
+  Baseline 1 episode  32 seed 900072 steps  26 policy  26 intercept  0 crash 1 return   11.77 | total  1141 eps 0.946 buffer  1141 loss 0.0013
+  Baseline 1 episode  33 seed 900073 steps 124 policy 124 intercept  0 crash 1 return   72.49 | total  1265 eps 0.940 buffer  1265 loss 0.0008
+  Baseline 1 episode  34 seed 900074 steps  71 policy  71 intercept  0 crash 1 return   24.85 | total  1336 eps 0.937 buffer  1336 loss 0.0011
+  Baseline 1 episode  35 seed 900075 steps  26 policy  26 intercept  0 crash 1 return    8.05 | total  1362 eps 0.935 buffer  1362 loss 0.0047
+  Baseline 1 episode  36 seed 900076 steps  34 policy  34 intercept  0 crash 1 return   22.48 | total  1396 eps 0.934 buffer  1396 loss 0.0020
+  Baseline 1 episode  37 seed 900077 steps  63 policy  63 intercept  0 crash 1 return   21.69 | total  1459 eps 0.931 buffer  1459 loss 0.0012
+  Baseline 1 episode  38 seed 900078 steps   6 policy   6 intercept  0 crash 1 return    2.79 | total  1465 eps 0.930 buffer  1465 loss 0.0007
+  Baseline 1 episode  39 seed 900079 steps  59 policy  59 intercept  0 crash 1 return   17.55 | total  1524 eps 0.928 buffer  1524 loss 0.0005
+  Baseline 1: { "reward": "R_v", "steps": 1524, "episodes": 40, "stored": 1524, "check": {  "bad": {   "start": 0,   "inner": 0,   "next": 0  },  "max_dR": 0.0,  "hist": {   "1": 1524  },  "d1": 40,  "d1_multi": 0,  "inner_cmds": {} }, "crashes": 40, "ttc_pen": 0.0, "col_pen": 0.0, "time": 53.8554883300003}
+  Baseline 2 episode   0 seed 900040 steps  14 policy  14 intercept  0 crash 1 return  -45.86 | total    14 eps 0.999 buffer    14 loss —
+  Baseline 2 episode   1 seed 900041 steps  28 policy  28 intercept  0 crash 1 return   -7.71 | total    42 eps 0.998 buffer    42 loss —
+  Baseline 2 episode   2 seed 900042 steps  49 policy  49 intercept  0 crash 1 return   -6.49 | total    91 eps 0.996 buffer    91 loss —
+  Baseline 2 episode   3 seed 900043 steps  12 policy  12 intercept  0 crash 1 return  -51.00 | total   103 eps 0.995 buffer   103 loss —
+  Baseline 2 episode   4 seed 900044 steps  27 policy  27 intercept  0 crash 1 return  -66.78 | total   130 eps 0.994 buffer   130 loss —
+  Baseline 2 episode   5 seed 900045 steps   9 policy   9 intercept  0 crash 1 return  -21.11 | total   139 eps 0.993 buffer   139 loss —
+  Baseline 2 episode   6 seed 900046 steps   4 policy   4 intercept  0 crash 1 return  -17.95 | total   143 eps 0.993 buffer   143 loss —
+  Baseline 2 episode   7 seed 900047 steps  14 policy  14 intercept  0 crash 1 return  -13.86 | total   157 eps 0.993 buffer   157 loss —
+  Baseline 2 episode   8 seed 900048 steps  28 policy  28 intercept  0 crash 1 return  -45.44 | total   185 eps 0.991 buffer   185 loss —
+  Baseline 2 episode   9 seed 900049 steps  67 policy  67 intercept  0 crash 1 return  -69.00 | total   252 eps 0.988 buffer   252 loss —
+  Baseline 2 episode  10 seed 900050 steps  23 policy  23 intercept  0 crash 1 return   -9.19 | total   275 eps 0.987 buffer   275 loss —
+  Baseline 2 episode  11 seed 900051 steps  13 policy  13 intercept  0 crash 1 return  -19.20 | total   288 eps 0.986 buffer   288 loss —
+  Baseline 2 episode  12 seed 900052 steps 172 policy 172 intercept  0 crash 1 return   35.51 | total   460 eps 0.978 buffer   460 loss —
+  Baseline 2 episode  13 seed 900053 steps  24 policy  24 intercept  0 crash 1 return   -9.27 | total   484 eps 0.977 buffer   484 loss —
+  Baseline 2 episode  14 seed 900054 steps  12 policy  12 intercept  0 crash 1 return  -14.49 | total   496 eps 0.976 buffer   496 loss —
+  Baseline 2 episode  15 seed 900055 steps   7 policy   7 intercept  0 crash 1 return  -16.92 | total   503 eps 0.976 buffer   503 loss 0.7268
+  Baseline 2 episode  16 seed 900056 steps  68 policy  68 intercept  0 crash 1 return  -79.75 | total   571 eps 0.973 buffer   571 loss 0.7177
+  Baseline 2 episode  17 seed 900057 steps  31 policy  31 intercept  0 crash 1 return  -49.42 | total   602 eps 0.971 buffer   602 loss 0.7811
+  Baseline 2 episode  18 seed 900058 steps  36 policy  36 intercept  0 crash 1 return   -7.42 | total   638 eps 0.970 buffer   638 loss 1.5137
+  Baseline 2 episode  19 seed 900059 steps  29 policy  29 intercept  0 crash 1 return   -4.68 | total   667 eps 0.968 buffer   667 loss 1.0441
+  Baseline 2 episode  20 seed 900060 steps  34 policy  34 intercept  0 crash 1 return   -3.00 | total   701 eps 0.967 buffer   701 loss 0.5743
+  Baseline 2 episode  21 seed 900061 steps  24 policy  24 intercept  0 crash 1 return  -29.28 | total   725 eps 0.966 buffer   725 loss 1.0973
+  Baseline 2 episode  22 seed 900062 steps  56 policy  56 intercept  0 crash 1 return  -29.24 | total   781 eps 0.963 buffer   781 loss 0.2499
+  Baseline 2 episode  23 seed 900063 steps  24 policy  24 intercept  0 crash 1 return  -28.84 | total   805 eps 0.962 buffer   805 loss 0.6742
+  Baseline 2 episode  24 seed 900064 steps  37 policy  37 intercept  0 crash 1 return  -27.34 | total   842 eps 0.960 buffer   842 loss 0.5726
+  Baseline 2 episode  25 seed 900065 steps  16 policy  16 intercept  0 crash 1 return  -22.92 | total   858 eps 0.959 buffer   858 loss 0.7085
+  Baseline 2 episode  26 seed 900066 steps  16 policy  16 intercept  0 crash 1 return  -14.36 | total   874 eps 0.958 buffer   874 loss 1.4720
+  Baseline 2 episode  27 seed 900067 steps  64 policy  64 intercept  0 crash 1 return  -42.10 | total   938 eps 0.955 buffer   938 loss 0.6285
+  Baseline 2 episode  28 seed 900068 steps  49 policy  49 intercept  0 crash 1 return  -41.63 | total   987 eps 0.953 buffer   987 loss 1.7292
+  Baseline 2 episode  29 seed 900069 steps 110 policy 110 intercept  0 crash 1 return -113.65 | total  1097 eps 0.948 buffer  1097 loss 0.9548
+  Baseline 2 episode  30 seed 900070 steps  10 policy  10 intercept  0 crash 1 return  -41.29 | total  1107 eps 0.947 buffer  1107 loss 1.3756
+  Baseline 2 episode  31 seed 900071 steps  44 policy  44 intercept  0 crash 1 return    2.94 | total  1151 eps 0.945 buffer  1151 loss 0.2465
+  Baseline 2 episode  32 seed 900072 steps 200 policy 200 intercept  0 crash 0 return   53.91 | total  1351 eps 0.936 buffer  1351 loss 0.4282
+  Baseline 2 episode  33 seed 900073 steps  39 policy  39 intercept  0 crash 1 return  -26.74 | total  1390 eps 0.934 buffer  1390 loss 0.8372
+  Baseline 2 episode  34 seed 900074 steps  31 policy  31 intercept  0 crash 1 return  -20.20 | total  1421 eps 0.933 buffer  1421 loss 0.8586
+  Baseline 2 episode  35 seed 900075 steps  23 policy  23 intercept  0 crash 1 return  -17.95 | total  1444 eps 0.931 buffer  1444 loss 0.3203
+  Baseline 2 episode  36 seed 900076 steps  53 policy  53 intercept  0 crash 1 return   -4.37 | total  1497 eps 0.929 buffer  1497 loss 0.7682
+  Baseline 2 episode  37 seed 900077 steps  28 policy  28 intercept  0 crash 1 return  -38.62 | total  1525 eps 0.928 buffer  1525 loss 0.7396
+  Baseline 2: { "reward": "R_RS", "steps": 1525, "episodes": 38, "stored": 1525, "check": {  "bad": {   "start": 0,   "inner": 0,   "next": 0  },  "max_dR": 0.0,  "hist": {   "1": 1525  },  "d1": 37,  "d1_multi": 0,  "inner_cmds": {} }, "crashes": 37, "ttc_pen": 860.0, "col_pen": 740.0, "time": 55.136942395000005}
+  { "episodes": 10, "steps": 2000, "E": 1999, "intercept": 1, "takeover": 1, "abort": 0, "fallback": 0, "N_att": 0, "N_blocked": 0, "BLCR": null, "N_busy": 0, "N_no_lane": 0, "N_att_rss": 0, "N_blocked_rss": 0, "BLCR_rss": null, "N_att_int": 0, "N_exec": 0, "N_exec_int": 0, "N_exec_other": 0, "masked": 368, "R_int": 0.1845, "crashes": 0, "CR": 0.0, "crash_intercept": 0, "crash_sup_active": 0, "crash_rear": 0, "completed": 10, "abort_ignored": 0, "ttc_pen": 0.0, "col_pen": 0.0, "v_eff": 17.664435729620166, "jerk_rms": 31.76840962674393, "jerk_rms_smooth": 5.240818429606451, "jerk_jump_share": 0.9308836955855613, "jerk_jumps": 697, "frames": 4000, "shield_cfg": "observed/nominal/approach/zone=reach", "main_series": true, "arm": "Proposed (Режим Б)", "filter": "основная серия", "reward": "R_v", "h1": {  "n": 10,  "n_valid": 10,  "crashes": 0,  "crashes_valid": 0,  "CR_total": 0.0,  "CR_total_valid": 0.0,  "h1_events": 0,  "CR_ego_op": 0.0,  "categories": {},  "rho_cls": 0.6 }}
+  { "episodes": 10, "steps": 357, "E": 357, "intercept": 0, "takeover": 0, "abort": 0, "fallback": 0, "N_att": 135, "N_blocked": 0, "BLCR": 0.0, "N_busy": 0, "N_no_lane": 0, "N_att_rss": 135, "N_blocked_rss": 0, "BLCR_rss": 0.0, "N_att_int": 0, "N_exec": 13, "N_exec_int": 0, "N_exec_other": 0, "masked": 0, "R_int": 0.0, "crashes": 10, "CR": 1.0, "crash_intercept": 0, "crash_sup_active": 0, "crash_rear": 0, "completed": 0, "abort_ignored": 0, "ttc_pen": 0.0, "col_pen": 0.0, "v_eff": 4.029449867205167, "jerk_rms": 8.601917912938285, "jerk_rms_smooth": 2.8266363956024443, "jerk_jump_share": 0.8323877435512472, "jerk_jumps": 12, "frames": 714, "shield_cfg": "none", "main_series": null, "arm": "Baseline 1", "filter": "нет", "reward": "R_v", "h1": {  "n": 10,  "n_valid": 10,  "crashes": 10,  "crashes_valid": 10,  "CR_total": 1.0,  "CR_total_valid": 1.0,  "h1_events": 10,  "CR_ego_op": 1.0,  "categories": {   "CR_ego_op (manoeuvre)": 10  },  "rho_cls": 1.0 }}
+  { "episodes": 10, "steps": 321, "E": 321, "intercept": 0, "takeover": 0, "abort": 0, "fallback": 0, "N_att": 136, "N_blocked": 0, "BLCR": 0.0, "N_busy": 0, "N_no_lane": 0, "N_att_rss": 136, "N_blocked_rss": 0, "BLCR_rss": 0.0, "N_att_int": 0, "N_exec": 38, "N_exec_int": 0, "N_exec_other": 0, "masked": 0, "R_int": 0.0, "crashes": 10, "CR": 1.0, "crash_intercept": 0, "crash_sup_active": 0, "crash_rear": 2, "completed": 0, "abort_ignored": 0, "ttc_pen": 245.0, "col_pen": 200.0, "v_eff": 3.0153600586143527, "jerk_rms": 12.557762411052995, "jerk_rms_smooth": 5.215892838381499, "jerk_jump_share": 0.5942135897205995, "jerk_jumps": 13, "frames": 642, "shield_cfg": "none", "main_series": null, "arm": "Baseline 2", "filter": "нет", "reward": "R_RS", "h1": {  "n": 10,  "n_valid": 10,  "crashes": 10,  "crashes_valid": 10,  "CR_total": 1.0,  "CR_total_valid": 1.0,  "h1_events": 10,  "CR_ego_op": 1.0,  "categories": {   "CR_ego_op (manoeuvre)": 10  },  "rho_cls": 1.0 }}
+  { "episodes": 10, "steps": 2000, "E": 1992, "intercept": 8, "takeover": 8, "abort": 0, "fallback": 0, "N_att": 256, "N_blocked": 256, "BLCR": 1.0, "N_busy": 0, "N_no_lane": 186, "N_att_rss": 70, "N_blocked_rss": 70, "BLCR_rss": 1.0, "N_att_int": 0, "N_exec": 0, "N_exec_int": 0, "N_exec_other": 0, "masked": 746, "R_int": 0.377, "crashes": 0, "CR": 0.0, "crash_intercept": 0, "crash_sup_active": 0, "crash_rear": 0, "completed": 10, "abort_ignored": 0, "ttc_pen": 0.0, "col_pen": 0.0, "v_eff": 17.427865136735566, "jerk_rms": 43.05993697147549, "jerk_rms_smooth": 5.740285167115995, "jerk_jump_share": 0.9803539945378855, "jerk_jumps": 1039, "frames": 4000, "shield_cfg": "observed/nominal/approach/zone=reach", "main_series": true, "arm": "Режим А (Baseline 1 + фильтр)", "filter": "основная серия", "reward": "R_v", "h1": {  "n": 10,  "n_valid": 10,  "crashes": 0,  "crashes_valid": 0,  "CR_total": 0.0,  "CR_total_valid": 0.0,  "h1_events": 0,  "CR_ego_op": 0.0,  "categories": {},  "rho_cls": 0.6 }}
+  { "episodes": 2, "steps": 400, "E": 395, "intercept": 5, "takeover": 5, "abort": 0, "fallback": 0, "N_att": 120, "N_blocked": 120, "BLCR": 1.0, "N_busy": 0, "N_no_lane": 79, "N_att_rss": 41, "N_blocked_rss": 41, "BLCR_rss": 1.0, "N_att_int": 1, "N_exec": 0, "N_exec_int": 0, "N_exec_other": 0, "masked": 177, "R_int": 0.455, "crashes": 0, "CR": 0.0, "crash_intercept": 0, "crash_sup_active": 0, "crash_rear": 0, "completed": 2, "abort_ignored": 0, "ttc_pen": 0.0, "col_pen": 0.0, "v_eff": 16.48774277253451, "jerk_rms": 41.80792505507844, "jerk_rms_smooth": 5.641136916058173, "jerk_jump_share": 0.9847609190002211, "jerk_jumps": 171, "frames": 800, "shield_cfg": "observed/nominal/approach/zone=reach", "main_series": true, "arm": "А-raw (без отображения)", "filter": "основная серия", "reward": "R_v", "h1": {  "n": 2,  "n_valid": 2,  "crashes": 0,  "crashes_valid": 0,  "CR_total": 0.0,  "CR_total_valid": 0.0,  "h1_events": 0,  "CR_ego_op": 0.0,  "categories": {},  "rho_cls": 0.6 }}
+[7/10] lane-change seeker (executed lane changes, ABORT)
+  seeker D 10 rho 0.1 seed 900110: steps 200 N_att_rss 166 N_blocked_rss 164 N_exec 4 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.1 seed 900111: steps 200 N_att_rss 150 N_blocked_rss 148 N_exec 2 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.1 seed 900112: steps 200 N_att_rss 161 N_blocked_rss 159 N_exec 3 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.1 seed 900113: steps 200 N_att_rss 192 N_blocked_rss 191 N_exec 1 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.1 seed 900114: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.1 seed 900115: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.1 seed 900116: steps 200 N_att_rss 88 N_blocked_rss 88 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.1 seed 900117: steps 200 N_att_rss 77 N_blocked_rss 77 N_exec 5 ABORT 0 TAKEOVER 3 FALLBACK 0 crash 0
+  seeker D 10 rho 0.1 seed 900118: steps 200 N_att_rss 104 N_blocked_rss 104 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.1 seed 900119: steps 200 N_att_rss 137 N_blocked_rss 132 N_exec 7 ABORT 1 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.1 seed 900120: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.1 seed 900121: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.1 seed 900122: steps 140 N_att_rss 134 N_blocked_rss 133 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 1 crash 1
+  seeker D 25 rho 0.1 seed 900123: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.1 seed 900124: steps 200 N_att_rss 100 N_blocked_rss 100 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.1 seed 900125: steps 200 N_att_rss 108 N_blocked_rss 108 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.1 seed 900126: steps 200 N_att_rss 89 N_blocked_rss 89 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.1 seed 900127: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.1 seed 900128: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.1 seed 900129: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900110: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900111: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900112: steps 200 N_att_rss 198 N_blocked_rss 198 N_exec 0 ABORT 0 TAKEOVER 2 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900113: steps 200 N_att_rss 198 N_blocked_rss 198 N_exec 0 ABORT 0 TAKEOVER 2 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900114: steps 200 N_att_rss 196 N_blocked_rss 196 N_exec 1 ABORT 0 TAKEOVER 2 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900115: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900116: steps 200 N_att_rss 88 N_blocked_rss 88 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900117: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900118: steps 200 N_att_rss 104 N_blocked_rss 104 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 10 rho 0.6 seed 900119: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900120: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900121: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900122: steps 200 N_att_rss 136 N_blocked_rss 135 N_exec 0 ABORT 0 TAKEOVER 2 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900123: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900124: steps 200 N_att_rss 100 N_blocked_rss 100 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900125: steps 200 N_att_rss 108 N_blocked_rss 108 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900126: steps 200 N_att_rss 89 N_blocked_rss 89 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900127: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900128: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  seeker D 25 rho 0.6 seed 900129: steps 200 N_att_rss 200 N_blocked_rss 200 N_exec 0 ABORT 0 TAKEOVER 0 FALLBACK 0 crash 0
+  D 10 rho 0.1: { "D": 10, "rho": 0.1, "episodes": 10, "steps": 2000, "E": 1996, "intercept": 4, "takeover": 3, "abort": 1, "fallback": 0, "N_att": 1996, "N_blocked": 1984, "BLCR": 0.9939879759519038, "N_busy": 183, "N_no_lane": 338, "N_att_rss": 1475, "N_blocked_rss": 1463, "BLCR_rss": 0.991864406779661, "N_att_int": 4, "N_exec": 22, "N_exec_int": 0, "N_exec_other": 0, "masked": 1984, "R_int": 0.994, "crashes": 0, "CR": 0.0, "crash_intercept": 0, "crash_sup_active": 0, "crash_rear": 0, "completed": 10, "abort_ignored": 0, "ttc_pen": 0.0, "col_pen": 0.0, "v_eff": 23.54350338827432, "jerk_rms": 2.8939181427349476, "jerk_rms_smooth": 1.112638219892136, "jerk_jump_share": 0.5494244150069407, "jerk_jumps": 6, "frames": 4000, "shield_cfg": "observed/nominal/approach/zone=reach", "main_series": true}
+  D 25 rho 0.1: { "D": 25, "rho": 0.1, "episodes": 10, "steps": 1940, "E": 1939, "intercept": 1, "takeover": 0, "abort": 0, "fallback": 1, "N_att": 1939, "N_blocked": 1938, "BLCR": 0.999484270242393, "N_busy": 5, "N_no_lane": 303, "N_att_rss": 1631, "N_blocked_rss": 1630, "BLCR_rss": 0.9993868792152054, "N_att_int": 1, "N_exec": 0, "N_exec_int": 0, "N_exec_other": 0, "masked": 1938, "R_int": 0.9994845360824742, "crashes": 1, "CR": 0.1, "crash_intercept": 1, "crash_sup_active": 0, "crash_rear": 0, "completed": 9, "abort_ignored": 0, "ttc_pen": 0.0, "col_pen": 0.0, "v_eff": 14.487122436063306, "jerk_rms": 1.2354568733845612, "jerk_rms_smooth": 0.6739564038735004, "jerk_jump_share": 0.09051622981330619, "jerk_jumps": 3, "frames": 3880, "shield_cfg": "observed/nominal/approach/zone=reach", "main_series": true}
+  D 10 rho 0.6: { "D": 10, "rho": 0.6, "episodes": 10, "steps": 2000, "E": 1994, "intercept": 6, "takeover": 6, "abort": 0, "fallback": 0, "N_att": 1994, "N_blocked": 1994, "BLCR": 1.0, "N_busy": 2, "N_no_lane": 208, "N_att_rss": 1784, "N_blocked_rss": 1784, "BLCR_rss": 1.0, "N_att_int": 6, "N_exec": 1, "N_exec_int": 0, "N_exec_other": 0, "masked": 1994, "R_int": 1.0, "crashes": 0, "CR": 0.0, "crash_intercept": 0, "crash_sup_active": 0, "crash_rear": 0, "completed": 10, "abort_ignored": 0, "ttc_pen": 0.0, "col_pen": 0.0, "v_eff": 22.258951961576948, "jerk_rms": 3.270139021009558, "jerk_rms_smooth": 1.5745651522644342, "jerk_jump_share": 0.526976033145296, "jerk_jumps": 6, "frames": 4000, "shield_cfg": "observed/nominal/approach/zone=reach", "main_series": true}
+  D 25 rho 0.6: { "D": 25, "rho": 0.6, "episodes": 10, "steps": 2000, "E": 1998, "intercept": 2, "takeover": 2, "abort": 0, "fallback": 0, "N_att": 1998, "N_blocked": 1997, "BLCR": 0.9994994994994995, "N_busy": 62, "N_no_lane": 303, "N_att_rss": 1633, "N_blocked_rss": 1632, "BLCR_rss": 0.9993876301285977, "N_att_int": 2, "N_exec": 0, "N_exec_int": 0, "N_exec_other": 0, "masked": 1997, "R_int": 0.9995, "crashes": 0, "CR": 0.0, "crash_intercept": 0, "crash_sup_active": 0, "crash_rear": 0, "completed": 10, "abort_ignored": 0, "ttc_pen": 0.0, "col_pen": 0.0, "v_eff": 14.412479950052822, "jerk_rms": 1.4236881231134741, "jerk_rms_smooth": 0.7871216952533869, "jerk_jump_share": 0.17023950967540963, "jerk_jumps": 3, "frames": 4000, "shield_cfg": "observed/nominal/approach/zone=reach", "main_series": true}
+  first ABORT: D 10 rho 0.1 seed 900119 k 190
+[8/10] adjacent-lane diagnostic (rho = 0.6 vs 1.0, lateral rules)
+  { "seed": 900092, "rho": 0.6, "rule": "approach", "steps": 200, "intercept": 0, "share": 0.0, "empty": 0, "masked": 0, "crashed": false, "unsafe_rule": false, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900092, "rho": 0.6, "rule": "rss", "steps": 200, "intercept": 0, "share": 0.0, "empty": 0, "masked": 0, "crashed": false, "unsafe_rule": false, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900092, "rho": 1.0, "rule": "approach", "steps": 200, "intercept": 2, "share": 0.01, "empty": 2, "masked": 0, "crashed": false, "unsafe_rule": false, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900092, "rho": 1.0, "rule": "rss", "steps": 200, "intercept": 20, "share": 0.1, "empty": 20, "masked": 0, "crashed": false, "unsafe_rule": true, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900093, "rho": 0.6, "rule": "approach", "steps": 200, "intercept": 0, "share": 0.0, "empty": 0, "masked": 0, "crashed": false, "unsafe_rule": false, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900093, "rho": 0.6, "rule": "rss", "steps": 200, "intercept": 0, "share": 0.0, "empty": 0, "masked": 0, "crashed": false, "unsafe_rule": false, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900093, "rho": 1.0, "rule": "approach", "steps": 200, "intercept": 2, "share": 0.01, "empty": 2, "masked": 0, "crashed": false, "unsafe_rule": false, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900093, "rho": 1.0, "rule": "rss", "steps": 200, "intercept": 20, "share": 0.1, "empty": 20, "masked": 0, "crashed": false, "unsafe_rule": true, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900094, "rho": 0.6, "rule": "approach", "steps": 200, "intercept": 0, "share": 0.0, "empty": 0, "masked": 0, "crashed": false, "unsafe_rule": false, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900094, "rho": 0.6, "rule": "rss", "steps": 200, "intercept": 0, "share": 0.0, "empty": 0, "masked": 0, "crashed": false, "unsafe_rule": false, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900094, "rho": 1.0, "rule": "approach", "steps": 200, "intercept": 3, "share": 0.015, "empty": 3, "masked": 0, "crashed": false, "unsafe_rule": false, "unsafe": false, "unsafe_lane": false}
+  { "seed": 900094, "rho": 1.0, "rule": "rss", "steps": 200, "intercept": 30, "share": 0.15, "empty": 30, "masked": 0, "crashed": false, "unsafe_rule": true, "unsafe": false, "unsafe_lane": false}
+[9/10] lane-change admissibility over the (D, rho) grid
+  { "D": 10, "model": "observed", "lc_prediction": "nominal", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 11, "right": 46, "any": 57, "front": 359, "rear": 230, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.19}
+  { "D": 10, "model": "observed", "lc_prediction": "worst_case", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 512, "rear": 510, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 11, "right": 46, "any": 57, "front": 359, "rear": 290, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.19}
+  { "D": 10, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 540, "rear": 540, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "observed", "lc_prediction": "nominal", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 36, "any": 36, "front": 438, "rear": 231, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.12}
+  { "D": 10, "model": "observed", "lc_prediction": "worst_case", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 530, "rear": 515, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 36, "any": 36, "front": 438, "rear": 294, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.12}
+  { "D": 10, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 540, "rear": 540, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "observed", "lc_prediction": "nominal", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 7, "any": 7, "front": 478, "rear": 253, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.023333333333333334}
+  { "D": 10, "model": "observed", "lc_prediction": "worst_case", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 540, "rear": 540, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 7, "any": 7, "front": 478, "rear": 344, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.023333333333333334}
+  { "D": 10, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 540, "rear": 540, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "observed", "lc_prediction": "nominal", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 476, "rear": 264, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "observed", "lc_prediction": "worst_case", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 540, "rear": 540, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 485, "rear": 380, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 540, "rear": 540, "busy": 0, "no_lane": 60, "intercept": 0, "share": 0.0}
+  { "D": 10, "model": "observed", "lc_prediction": "nominal", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 390, "rear": 441, "busy": 0, "no_lane": 60, "intercept": 9, "share": 0.0}
+  { "D": 10, "model": "observed", "lc_prediction": "worst_case", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 511, "rear": 540, "busy": 0, "no_lane": 60, "intercept": 9, "share": 0.0}
+  { "D": 10, "model": "occupancy", "lc_prediction": "nominal", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 390, "rear": 507, "busy": 0, "no_lane": 60, "intercept": 9, "share": 0.0}
+  { "D": 10, "model": "occupancy", "lc_prediction": "worst_case", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 536, "rear": 540, "busy": 0, "no_lane": 60, "intercept": 9, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "nominal", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 195, "rear": 408, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "worst_case", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 238, "rear": 455, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "nominal", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 223, "rear": 428, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "worst_case", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 266, "rear": 467, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "nominal", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 319, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "worst_case", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 358, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "nominal", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 427, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "worst_case", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 430, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "nominal", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "observed", "lc_prediction": "worst_case", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "nominal", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 25, "model": "occupancy", "lc_prediction": "worst_case", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "nominal", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 17, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "worst_case", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 48, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.1, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "nominal", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 48, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "worst_case", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 81, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.2, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "nominal", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 208, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "worst_case", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 345, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.4, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "nominal", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 400, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "worst_case", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "nominal", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 466, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "worst_case", "rho": 0.6, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 0, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "nominal", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 476, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 3, "share": 0.0}
+  { "D": 40, "model": "observed", "lc_prediction": "worst_case", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 3, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "nominal", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 478, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 3, "share": 0.0}
+  { "D": 40, "model": "occupancy", "lc_prediction": "worst_case", "rho": 1.0, "episodes": 10, "ticks": 300, "left": 0, "right": 0, "any": 0, "front": 480, "rear": 480, "busy": 0, "no_lane": 120, "intercept": 3, "share": 0.0}
+[10/10] report
+final counters (protocol 7.7; decision set of rss_shield.accounting):
+  training Proposed: steps=3000 E=2994 intercept=6 takeover=5 abort=0 fallback=1 N_att=1661 N_blocked=1637 N_busy=1276 N_no_lane=45 N_att_int=1 N_exec=9 N_exec_int=0 N_exec_other=0 masked=2457 abort_ignored=0 crashes=0 | filter observed/nominal/approach/zone=reach
+  evaluation Proposed (Режим Б): steps=2000 E=1999 intercept=1 takeover=1 abort=0 fallback=0 N_att=0 N_blocked=0 N_busy=0 N_no_lane=0 N_att_int=0 N_exec=0 N_exec_int=0 N_exec_other=0 masked=368 abort_ignored=0 crashes=0 | filter observed/nominal/approach/zone=reach
+  evaluation Baseline 1: steps=357 E=357 intercept=0 takeover=0 abort=0 fallback=0 N_att=135 N_blocked=0 N_busy=0 N_no_lane=0 N_att_int=0 N_exec=13 N_exec_int=0 N_exec_other=0 masked=0 abort_ignored=0 crashes=10 | filter none
+  evaluation Baseline 2: steps=321 E=321 intercept=0 takeover=0 abort=0 fallback=0 N_att=136 N_blocked=0 N_busy=0 N_no_lane=0 N_att_int=0 N_exec=38 N_exec_int=0 N_exec_other=0 masked=0 abort_ignored=0 crashes=10 | filter none
+  evaluation Режим А (Baseline 1 + фильтр): steps=2000 E=1992 intercept=8 takeover=8 abort=0 fallback=0 N_att=256 N_blocked=256 N_busy=0 N_no_lane=186 N_att_int=0 N_exec=0 N_exec_int=0 N_exec_other=0 masked=746 abort_ignored=0 crashes=0 | filter observed/nominal/approach/zone=reach
+  evaluation А-raw (без отображения): steps=400 E=395 intercept=5 takeover=5 abort=0 fallback=0 N_att=120 N_blocked=120 N_busy=0 N_no_lane=79 N_att_int=1 N_exec=0 N_exec_int=0 N_exec_other=0 masked=177 abort_ignored=0 crashes=0 | filter observed/nominal/approach/zone=reach
+filter configuration of all filtered arms is MAIN_SERIES: True
+H1 (experiments.h1): correct start at rho = 1.0 s for every arm; classification rho = rho of the filter, 1.0 s without a filter; CR_total from the crash flag alone
+  Proposed (Режим Б): episodes 10 correct starts 10 crashes 0 (CR_total 0.000) rho_cls 0.6 H1 events 0 categories {}
+  Baseline 1: episodes 10 correct starts 10 crashes 10 (CR_total 1.000) rho_cls 1.0 H1 events 10 categories { "CR_ego_op (manoeuvre)": 10}
+  Baseline 2: episodes 10 correct starts 10 crashes 10 (CR_total 1.000) rho_cls 1.0 H1 events 10 categories { "CR_ego_op (manoeuvre)": 10}
+  Режим А (Baseline 1 + фильтр): episodes 10 correct starts 10 crashes 0 (CR_total 0.000) rho_cls 0.6 H1 events 0 categories {}
+  А-raw (без отображения): episodes 2 correct starts 2 crashes 0 (CR_total 0.000) rho_cls 0.6 H1 events 0 categories {}
+pilot: OK
