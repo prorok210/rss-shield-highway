@@ -14,7 +14,9 @@ The policies do not learn: a unit is a seeded random policy with its own action 
 networks choose one action all the time). The table exercises every step of the analysis on real
 outputs of the generator, the filter and the runner; it carries no evidence about H1-H3: a mode
 effect cannot exist, because nothing was trained. Counters, start rule and H1 event are those of
-experiments.runner / experiments.h1.
+experiments.runner / experiments.h1; the table also carries the section 7.7 route, cut-in and
+density/deficit fields (L_target, t_reach_L, Ttravel_pen, completed, survived, n_cutin,
+density_mean, n_deficit_mean).
 """
 import argparse
 import csv
@@ -32,7 +34,10 @@ RHOS = (0.4, 0.6, 1.0)
 SEED0 = 900_300                 # episode seeds of the statistical pilot (pilot block 900 000+ of protocol table 4)
 COLUMNS = ("mode", "D", "rho", "unit", "unit_seed", "episode_seed", "correct_start", "rho_cls", "crashed",
            "crash_category", "h1_event", "steps", "E", "intercept", "N_att", "N_blocked", "N_busy",
-           "N_no_lane", "N_att_int", "N_exec", "N_exec_int", "N_exec_other", "v_eff", "shield_cfg")
+           "N_no_lane", "N_att_int", "N_exec", "N_exec_int", "N_exec_other", "v_eff", "shield_cfg",
+           "L_target", "delta_x", "t_reach_L", "t_travel_pen", "completed", "survived",
+           "n_cutin", "n_cutin_frames", "density_start", "density_mean", "density_min",
+           "n_outside_mean", "n_outside_max", "n_deficit_mean")
 
 
 class PilotPolicy:
@@ -50,7 +55,7 @@ class PilotPolicy:
 def row(mode, D, rho, unit, unit_seed, seed, c):
     r = dict(mode=mode, D=D, rho="" if rho is None else rho, unit=unit, unit_seed=unit_seed, episode_seed=seed)
     r.update({k: c[k] for k in COLUMNS if k in c})
-    for k in ("correct_start", "crashed", "h1_event"):
+    for k in ("correct_start", "crashed", "h1_event", "completed", "survived"):
         r[k] = int(bool(c[k]))
     r["crash_category"] = c["crash_category"] or ""
     return r

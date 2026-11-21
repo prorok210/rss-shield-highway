@@ -95,6 +95,7 @@ to forced braking (TAKEOVER, FALLBACK). ABORT is an intervention without forced 
 Decision.takeover is a deprecated alias of Decision.intervention (DeprecationWarning on access);
 it is not the forced braking of the vehicle (brake_mode).
 """
+import math
 import warnings
 from dataclasses import dataclass, field
 from typing import Optional
@@ -158,6 +159,23 @@ class ZoneError(ValueError):
     """The neighbour zone (or the traffic window that truncates it) is smaller than the bound."""
 
 
+def validate_zone(zone, min_zone):
+    """Finite float >= min_zone, or None.  Rejects bool, NaN and +/-inf explicitly: an ordered
+    comparison with NaN is False, so a bare `zone < min_zone` would silently admit NaN and the
+    zone filter would then discard every neighbour."""
+    if zone is None:
+        return None
+    if isinstance(zone, (bool, np.bool_)):
+        raise ZoneError(f"zone must be a finite float >= {min_zone:.3f} m, got bool {zone!r}")
+    try:
+        z = float(zone)
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise ZoneError(f"zone must be a finite float, got {zone!r}") from exc
+    if not math.isfinite(z) or z < min_zone:
+        raise ZoneError(f"invalid zone={zone!r}: must be finite and >= {min_zone:.3f} m")
+    return z
+
+
 def envelope_zone(rho, v_ego_max, v_other_max, lc_horizon=2.0):
     """Smallest sound neighbour zone of a scenario envelope: (ahead, behind) centre distances, m,
     for ego speeds <= v_ego_max and speeds of every other vehicle <= v_other_max."""
@@ -212,11 +230,24 @@ class ShieldConfig:
                               ("lateral_rule", ("approach", "rss"))):
             if getattr(self, name) not in allowed:
                 raise ValueError(f"{name} = {getattr(self, name)!r}, expected one of {allowed}")
-        if self.zone is not None:
-            need = complete_zone(self.rho, self.lc_horizon)
-            if self.zone < need - 1e-9:
-                raise ZoneError(f"zone = {self.zone} m is incomplete: rho = {self.rho} s and "
-                                f"v <= {V_MAX} m/s need >= {need:.3f} m (or zone=None)")
+        for name in ("rho", "lc_horizon", "eps"):
+            value = getattr(self, name)
+            if isinstance(value, (bool, np.bool_)):
+                raise ValueError(f"{name} must be a finite number, got bool {value!r}")
+            try:
+                finite = math.isfinite(float(value))
+            except (TypeError, ValueError, OverflowError):
+                finite = False
+            if not finite:
+                raise ValueError(f"{name} must be finite, got {value!r}")
+        if self.rho < 0.0:
+            raise ValueError(f"rho must be non-negative, got {self.rho!r}")
+        if self.lc_horizon <= 0.0:
+            raise ValueError(f"lc_horizon must be positive, got {self.lc_horizon!r}")
+        if self.eps < 0.0:
+            raise ValueError(f"eps must be non-negative, got {self.eps!r}")
+        need = complete_zone(self.rho, self.lc_horizon)
+        validate_zone(self.zone, need - 1e-9)
 
 
 @dataclass

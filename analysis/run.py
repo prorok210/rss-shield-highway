@@ -4,7 +4,7 @@
 
 Emits every number the plan mentions: H1a / H1b checks with Clopper-Pearson bounds and the IUT
 outcome, CR_total of every arm, the descriptive difference Proposed - Baseline 2 with its
-two-level cluster bootstrap interval, the seven primary checks of H2 / H3 (estimate, standard
+two-factor paired cluster-bootstrap interval, the seven primary checks of H2 / H3 (estimate, standard
 error, signed root, one-sided bootstrap p, Holm, sensitivity analysis with shared scenario ids,
 reconciled outcome), the control model, the contrast of differences, adjacent contrasts, Page's
 tests and the dispersion diagnostics. On pilot data the numbers only show that the chain runs;
@@ -19,6 +19,7 @@ import numpy as np
 
 from analysis import binomial as B
 from analysis import plan as P
+from analysis.design import DesignCompletenessError, validate_design_completeness
 
 H1_RHOS = (0.6, 1.0)           # rho levels of H1a; 0.4 is the boundary level (descriptive)
 
@@ -65,22 +66,29 @@ def h1_summary(checks):
 
 def h1_difference(rows, n_boot, rng):
     """CR_ego(Proposed, mode B, rho) - CR_ego(Baseline 2) per D and rho in H1_RHOS on correct
-    starts; Baseline 2 events are the ones classified at the reference rho."""
+    starts, with the two-way cluster bootstrap that keeps the shared episode_seed.  Baseline 2
+    events are the ones classified at the reference rho; extra Baseline 2 scenarios are excluded
+    from the pair and reported."""
     def events(mode, D, rho=None):
         g = {}
         for r in rows:
             if r["mode"] == mode and float(r["D"]) == D and (rho is None or float(r["rho"]) == rho) \
                     and flag(r["correct_start"]):
-                g.setdefault(r["unit"], []).append(float(flag(r["h1_event"])))
-        return [np.array(v) for v in g.values()]
+                g.setdefault(r["unit"], {})[int(r["episode_seed"])] = int(flag(r["h1_event"]))
+        return g
     out = []
     for D in sorted({float(r["D"]) for r in rows}):
         base = events("B2", D)
         for rho in H1_RHOS:
             prop = events("B", D, rho)
             if prop and base:
-                d, lo, hi = B.cluster_bootstrap_difference(prop, base, n_boot, rng)
-                out.append(dict(D=D, rho=rho, difference=d, lower=lo, upper=hi, policies=(len(prop), len(base))))
+                b = B.bootstrap_h1_diff_twoway(prop, base, n_boot=n_boot,
+                                               seed=int(rng.integers(2**31 - 1)))
+                out.append(dict(D=D, rho=rho, difference=b["diff"], lower=b["ci_low"],
+                                upper=b["ci_high"], policies=(b["n_units_proposed"],
+                                                              b["n_units_baseline2"]),
+                                n_common_scenarios=b["n_common_scenarios"],
+                                n_extra_b2_excluded=b["n_extra_b2_excluded"]))
     return out
 
 
@@ -103,13 +111,22 @@ def main(argv=None):
     p.add_argument("--out", required=True)
     p.add_argument("--boot", type=int, default=1000, help="parametric bootstrap replicates (plan: >= 1000)")
     p.add_argument("--boot-sens", type=int, default=2000, help="two-way cluster bootstrap replicates")
-    p.add_argument("--boot-diff", type=int, default=10000, help="two-level bootstrap of the H1 difference")
+    p.add_argument("--boot-diff", type=int, default=10000, help="paired bootstrap of the H1 difference")
     p.add_argument("--seed", type=int, default=20261110)
+    p.add_argument("--design", choices=("main", "pilot"), default="main",
+                   help="main: enforce the full pre-registered design before IUT/models; "
+                        "pilot: diagnostic run, completeness check skipped")
     args = p.parse_args(argv)
     rows = read(args.episodes)
+    if args.design == "main":
+        try:
+            validate_design_completeness(rows)
+        except DesignCompletenessError as exc:
+            sys.stderr.write(f"design completeness error: {exc}\n")
+            return 2
     ab = [r for r in rows if r["mode"] in "AB"]
     rng = np.random.default_rng(args.seed)
-    R = dict(args=vars(args), n_rows=len(rows))
+    R = dict(args=vars(args), n_rows=len(rows), design=args.design)
 
     checks = h1_checks(rows)
     R["h1_checks"], R["h1"] = checks, h1_summary(checks)
@@ -140,11 +157,18 @@ def main(argv=None):
                 L, pv, how = P.page_test(tab)
                 R["page"][f"{outcome} over {over}"] = dict(levels=levels, blocks=len(tab), L=L, p=pv, method=how)
 
-    L = ["# Statistical plan on pilot data (protocol 7.9)", "",
-         f"Input: `{args.episodes}`, {len(rows)} episodes. Parametric bootstrap: {args.boot} replicates "
-         f"(the plan requires at least 1000 for the main series); two-way cluster bootstrap: {args.boot_sens}; "
-         f"H1 difference: {args.boot_diff}. Pilot policies are not trained: the numbers show that every step of "
-         "the plan is computed, not that H1-H3 hold.", "",
+    title = ("# Statistical plan (protocol 7.9)" if args.design == "main"
+             else "# Statistical plan on pilot data (protocol 7.9)")
+    intro = (f"Input: `{args.episodes}`, {len(rows)} episodes. Parametric bootstrap: {args.boot} "
+             f"replicates; two-way cluster bootstrap: {args.boot_sens}; H1 difference: {args.boot_diff}.")
+    if args.design != "main":
+        intro += (" Pilot policies are not trained: the numbers show that every step of the plan is "
+                  "computed, not that H1-H3 hold.")
+    L = [title, "",
+         f"Design mode: **{args.design}**"
+         + ("" if args.design == "main" else
+            " (diagnostic: the pre-registered design completeness is not enforced)") + ".", "",
+         intro, "",
          "## H1: checks on episodes with a correct start", "",
          "Start rule and classification rho: `experiments/h1.py` (correct start at rho = 1.0 s for every arm; "
          "Baseline 2 classified at the reference rho = 1.0 s). `rho_cls` is the rho used for the categories.", "",
@@ -157,24 +181,34 @@ def main(argv=None):
          f"H1b (IUT over the {R['h1']['H1b']['checks']} Baseline 2 checks): **{R['h1']['H1b']['outcome']}** "
          f"({R['h1']['H1b']['exceeded']} exceeded, {R['h1']['H1b']['confirmed']} confirmed). "
          "Checks with rho = 0.4 are the boundary level: descriptive, outside the decision.", "",
-         "Descriptive difference CR_ego_op(Proposed, mode B) − CR_ego_op(Baseline 2), two-level cluster bootstrap:", "",
-         table(["D", "rho", "difference", "lower 95 %", "upper 95 %", "policies (Proposed, Baseline 2)"],
-               [[d["D"], d["rho"], d["difference"], d["lower"], d["upper"], f"{d['policies'][0]}, {d['policies'][1]}"]
+         "Descriptive difference CR_ego_op(Proposed, mode B) − CR_ego_op(Baseline 2) on the common "
+         "correct-start scenarios, two-factor cluster bootstrap (shared scenario multiplicities):", "",
+         table(["D", "rho", "difference", "lower 95 %", "upper 95 %", "common scenarios",
+                "extra B2 excluded", "policies (Proposed, Baseline 2)"],
+               [[d["D"], d["rho"], d["difference"], d["lower"], d["upper"], d["n_common_scenarios"],
+                 d["n_extra_b2_excluded"], f"{d['policies'][0]}, {d['policies'][1]}"]
                 for d in R["h1_difference"]]), "",
          "## H2 / H3: seven primary checks", "",
          "Covariates: Dc = (D − 25) / 10, rhoc = rho − 2/3 (grid means), mode = 1 for mode B. One-sided p: "
          "parametric bootstrap of the signed likelihood root under the null model; Holm over the seven checks in "
          "each analysis; sensitivity: two-way cluster bootstrap that keeps shared scenario ids.", "",
-         table(["check", "function", "model", "estimate", "SE", "signed root", "p (bootstrap)", "p Holm",
-                "converged", "sens. estimate", "sens. 95 % interval", "sens. p", "sens. p Holm", "outcome"],
+         table(["check", "function", "model", "estimate", "SE", "signed root", "p (bootstrap)",
+                "B / B_conv", "stationary share", "p Holm", "converged (via)", "sens. estimate", "sens. 95 % interval",
+                "sens. p", "sens. p Holm", "outcome"],
                [[r["check"], f"`{r['function']}`", r["model"], r["primary"]["estimate"], r["primary"]["se"],
-                 r["primary"]["root"], r["primary"]["p_boot"], r["p_holm_primary"],
-                 "yes" if r["primary"]["converged"] else "no: " + r["primary"]["message"],
+                 r["primary"]["root"], r["primary"]["p_boot"],
+                 f"{r['primary'].get('B')} / {r['primary'].get('B_conv')}",
+                 fmt(r["primary"].get("stationary_share"), 3), r["p_holm_primary"],
+                 ("yes" if r["primary"]["converged"] else "no: " + r["primary"]["message"])
+                 + f" ({r['primary'].get('converged_via', '')})",
                  r["sensitivity"]["estimate"], f"[{fmt(r['sensitivity']['lower'])}; {fmt(r['sensitivity']['upper'])}]",
                  r["sensitivity"]["p"], r["p_holm_sensitivity"], r["outcome"]] for r in R["primary"]]), "",
          f"Control (outside the family) `{P.CONTROL.function.__name__}`, M5: estimate {fmt(R['control']['estimate'])}, "
-         f"SE {fmt(R['control']['se'])}, one-sided bootstrap p {fmt(R['control']['p_boot'])}, converged: "
-         f"{R['control']['converged']}{'' if R['control']['converged'] else ' (' + R['control']['message'] + ')'}.", "",
+         f"SE {fmt(R['control']['se'])}, one-sided bootstrap p {fmt(R['control']['p_boot'])}, "
+         f"B/B_conv {R['control'].get('B')}/{R['control'].get('B_conv')}, "
+         f"converged: {R['control']['converged']} ({R['control'].get('converged_via', '')}), "
+         f"stationary share {fmt(R['control'].get('stationary_share'), 3)}"
+         f"{'' if R['control']['converged'] else ' (' + R['control']['message'] + ')'}.", "",
          f"Excluded episodes: E = 0: {R['excluded']['E0']}; N_att = 0 (only from M4): {R['excluded']['N_att0']} of "
          f"{R['excluded']['episodes']}.", "",
          "Pearson dispersion without random effect and overdispersion (Poisson / binomial): "

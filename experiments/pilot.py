@@ -55,6 +55,7 @@ from experiments import h1  # noqa: E402
 from experiments.env import FAST_ROAD, THREAD_VARS, make_env, reset_cached  # noqa: E402
 from experiments.generator import (I_BRAKE, I_LANE, I_SPEED, N_KIN, QUEUE_CODES, RHOS,  # noqa: E402
                                    SPEED_SEEN, initially_unsafe, window_bounds)
+from experiments.metrics import ValidationSchedule  # noqa: E402
 from experiments.runner import JERK_JUMP, NAMES, mask_str, run_episode  # noqa: E402
 from rss_shield.accounting import LANE_CHANGES  # noqa: E402
 from rss_shield.params import ABORT, ACTION_INDEX, LANE_WIDTH, WIDTH  # noqa: E402
@@ -185,18 +186,21 @@ def warmup_check(infos):
 
 
 def start_summary(D, infos):
-    return dict(D=D, n=len(infos),
-                removed=[sum(1 for i in infos if i["removed"] == m) for m in (0, 1, 2)],
+    removed = [sum(1 for i in infos if i["removed"] == m) for m in (0, 1, 2)]
+    mean_removed = sum(m * c for m, c in enumerate(removed)) / len(infos)
+    n_window = float(np.mean([i["n_window"] for i in infos]))
+    return dict(D=D, n=len(infos), removed=removed,
                 ok=sum(1 for i in infos if i["insert_ok"]),
                 unsafe_a={r: sum(1 for i in infos if i["unsafe"][r]) for r in RHOS},
                 unsafe_b={r: sum(1 for i in infos if i["unsafe_lane"][r]) for r in RHOS},
                 density=float(np.mean([i["density"] for i in infos])),
+                n_window=n_window, n_outside_start=float(4 * D - mean_removed - n_window),
                 speed=float(np.mean([i["mean_speed"] for i in infos])),
                 t_reset=float(np.mean([i["t_reset"] for i in infos])))
 
 
 def train(args, seeds, cache, log, shield_on=True, reward_kind="Rv", steps=None, max_steps=None,
-          learning_starts=None, tag="Proposed"):
+          learning_starts=None, tag="Proposed", validation=None):
     """Training on the cycled training seeds. Proposed (shield_on=True): the budget is extended up
     to max_steps while the buffer holds no transition with n > 1. Baselines (no filter, every
     transition has n = 1): exactly the budget."""
@@ -206,6 +210,7 @@ def train(args, seeds, cache, log, shield_on=True, reward_kind="Rv", steps=None,
     agent = DQN(seed=args.seed,
                 learning_starts=args.learning_starts if learning_starts is None else learning_starts)
     steps_log, episodes = [], []
+    val_env = make_env(D=args.D) if validation is not None else None
     ep = 0
     t0 = time.perf_counter()
     while True:
@@ -221,6 +226,15 @@ def train(args, seeds, cache, log, shield_on=True, reward_kind="Rv", steps=None,
             f"total {agent.steps:5d} eps {agent.epsilon():.3f} buffer {agent.buffer.size:5d} "
             f"loss {fmt(agent.last_loss, 4)}")
         ep += 1
+        if validation is not None:
+            target = validation.next_due(agent.steps)
+            if target is not None:
+                sample = [run_episode(val_env, agent, rho=args.rho, shield_on=shield_on,
+                                      reward_kind=reward_kind, explore=False, seed=s,
+                                      episode=s) for s in validation.scenario_ids]
+                row = validation.record(target, sample)
+                log(f"  {tag} validation at {target}: Δx {row['delta_x_mean']:.3f} m "
+                    f"(min {row['delta_x_min']:.3f}, max {row['delta_x_max']:.3f})")
         multi = bool((agent.buffer.n[:agent.buffer.size] > 1).any())
         if agent.steps >= steps and (multi or not shield_on or agent.steps >= max_steps):
             break
@@ -513,6 +527,11 @@ def lane_change_grid(seeds_by_D, cache, n_steps=LC_GRID_STEPS, configs=LC_CONFIG
 def totals(stats):
     def s(k):
         return sum(c[k] for c in stats)
+
+    def mean(k):
+        return float(np.mean([c[k] for c in stats])) if stats else None
+
+    pes = [c for c in stats if c.get("t_reach_L") is not None]
     steps = s("steps")
     n_rss = s("N_att_rss")
     return dict(episodes=len(stats), steps=steps, E=s("E"), intercept=s("intercept"),
@@ -525,12 +544,21 @@ def totals(stats):
                 R_int=(s("masked") + s("intercept")) / steps if steps else None,
                 crashes=s("crashed"), CR=s("crashed") / len(stats) if stats else None,
                 crash_intercept=s("crash_intercept"), crash_sup_active=s("crash_sup_active"),
-                crash_rear=s("crash_rear"), completed=s("completed"), abort_ignored=s("abort_ignored"),
+                crash_rear=s("crash_rear"), completed=s("completed"), remained=s("survived"),
+                abort_ignored=s("abort_ignored"),
                 ttc_pen=s("ttc_pen"), col_pen=s("col_pen"),
-                v_eff=float(np.mean([c["v_eff"] for c in stats])),
-                jerk_rms=float(np.mean([c["jerk_rms"] for c in stats])),
-                jerk_rms_smooth=float(np.mean([c["jerk_rms_smooth"] for c in stats])),
-                jerk_jump_share=float(np.mean([c["jerk_jump_share"] for c in stats])),
+                v_eff=mean("v_eff"), dx=mean("delta_x"),
+                L_target=mean("L_target"), t_reach_L=(float(np.mean([c["t_reach_L"] for c in pes]))
+                                                      if pes else None),
+                t_travel_pen=mean("t_travel_pen"), comp_rate=(len(pes) / len(stats) if stats else None),
+                n_cutin=s("n_cutin"), n_cutin_frames=s("n_cutin_frames"),
+                density_start=mean("density_start"), density_mean=mean("density_mean"),
+                density_min=(float(np.min([c["density_min"] for c in stats])) if stats else None),
+                n_window_start=mean("n_window_start"), n_outside_mean=mean("n_outside_mean"),
+                n_outside_max=(int(max(c["n_outside_max"] for c in stats)) if stats else None),
+                n_deficit_mean=mean("n_deficit_mean"),
+                jerk_rms=mean("jerk_rms"), jerk_rms_smooth=mean("jerk_rms_smooth"),
+                jerk_jump_share=mean("jerk_jump_share"),
                 jerk_jumps=s("jerk_jumps"), frames=s("frames"),
                 shield_cfg="; ".join(sorted({c["shield_cfg"] for c in stats})),
                 main_series=(None if all(c["main_series"] is None for c in stats)
@@ -560,8 +588,11 @@ COUNTER_COLS = [("steps", "шагов"), ("E", "E"), ("intercept", "перехв
                 ("N_att_rss", "N_att_rss"), ("N_blocked_rss", "N_blocked_rss"), ("BLCR_rss", "BLCR_rss"),
                 ("N_att_int", "N_att_int"), ("N_exec", "N_exec"), ("N_exec_int", "N_exec_int"),
                 ("N_exec_other", "N_exec_other"), ("masked", "замена aπ"), ("R_int", "R_int"),
-                ("crashed", "столкновение"), ("completed", "до T_max"), ("dx", "Δx, м"),
-                ("v_eff", "v_eff, м/с"), ("jerk_rms", "JerkRMS"), ("jerk_rms_smooth", "JerkRMS без скачков"),
+                ("crashed", "столкновение"), ("completed", "достиг L(D)"), ("dx", "Δx, м"),
+                ("v_eff", "v_eff, м/с"), ("L_target", "L(D), м"), ("t_reach_L", "t_reach_L, с"),
+                ("t_travel_pen", "Ttravel_pen, с"), ("n_cutin", "N_cutin"),
+                ("n_cutin_frames", "кадров N_cutin"),
+                ("jerk_rms", "JerkRMS"), ("jerk_rms_smooth", "JerkRMS без скачков"),
                 ("jerk_jumps", "кадров со скачком")]
 
 
@@ -629,11 +660,12 @@ def report(args, R):
     for s in R["starts"]:
         rows.append([s["D"], s["n"], "/".join(str(x) for x in s["removed"]), f"{s['ok']} из {s['n']}",
                      " / ".join(str(s["unsafe_a"][r]) for r in RHOS),
-                     " / ".join(str(s["unsafe_b"][r]) for r in RHOS), s["density"], s["speed"],
-                     s["t_reset"]])
+                     " / ".join(str(s["unsafe_b"][r]) for r in RHOS), s["density"],
+                     s["n_window"], s["n_outside_start"], s["speed"], s["t_reset"]])
     a(table(["D", "эпизодов", "удалено 0/1/2", "вставка при ρ = 1,0",
              "(а) ρ = " + "/".join(str(r) for r in RHOS), "(б) ρ = " + "/".join(str(r) for r in RHOS),
-             "плотность в окне", "скорость в окне, м/с", "reset, с"], rows))
+             "плотность в окне на старте", "n_window на старте", "за окном на старте (n_outside)",
+             "скорость в окне, м/с", "reset, с"], rows))
     T = R["train"]
     a("")
     a("## 3. Обучение")
@@ -674,14 +706,33 @@ def report(args, R):
                           for k, _ in COUNTER_COLS])
     a(table(["сид"] + [h for _, h in COUNTER_COLS], rows))
     a("")
-    a("Итого: BLCR = ΣN_blocked / ΣN_att; N_att_rss и N_blocked_rss — попытки и блокировки без "
-      "блокировок busy (манёвр в процессе или в очереди) и «нет полосы», по ним строятся модели H3; "
-      "BLCR_rss = ΣN_blocked_rss / ΣN_att_rss. N_exec считается по шагу политики, команда которого "
-      "действительно сдвинула целевую полосу (столбец exec_from журнала; разворот незавершённого "
-      "манёвра, ABORT и FALLBACK снимают запись), поэтому каждое выполненное перестроение входит в "
-      "экспозицию E; N_exec_other — пересечения разметки без такой записи (ожидается 0). "
-      "R_int = (Σзамен + Σшагов перехвата) / Σшагов, v_eff и JerkRMS — средние по эпизодам. "
-      "Журнал шагов: `eval_journal.csv`.")
+    a("Итого: BLCR = ΣN_blocked / ΣN_att; модели H3 используют полные N_att и N_blocked на шагах "
+      "политики. N_att_rss = N_att − N_busy − N_no_lane и N_blocked_rss = N_blocked − N_busy − "
+      "N_no_lane — справочная декомпозиция причин блокировки (busy — манёвр в процессе или в "
+      "очереди, N_no_lane — смена полосы за край дороги), а не знаменатель H3; "
+      "BLCR_rss = ΣN_blocked_rss / ΣN_att_rss приводится описательно. N_exec считается по шагу "
+      "политики, команда которого действительно сдвинула целевую полосу (столбец exec_from журнала; "
+      "разворот незавершённого манёвра, ABORT и FALLBACK снимают запись), поэтому каждое выполненное "
+      "перестроение входит в экспозицию E; N_exec_other — пересечения разметки без такой записи "
+      "(ожидается 0). R_int = (Σзамен + Σшагов перехвата) / Σшагов, v_eff и JerkRMS — средние по "
+      "эпизодам. completed = reached_L — достижение L(D) до столкновения или конца эпизода; survived "
+      "хранится отдельно. N_cutin — покадровые врезания соседа при удержании полосы (правило "
+      "approach). Журнал шагов: `eval_journal.csv`.")
+    a("")
+    a(f"Плотность окна [0; T_max] (п. 7.6): стартовая {fmt(tot['density_start'], 2)}, средняя "
+      f"{fmt(tot['density_mean'], 2)}, минимальная {fmt(tot['density_min'], 2)} авт./км на полосу при "
+      f"номинале D = {args.D}; машин за окном в среднем {fmt(tot['n_outside_mean'], 2)}, максимум "
+      f"{fmt(tot['n_outside_max'], 0)}; средняя полная недостача относительно номинала 4D — "
+      f"{fmt(tot['n_deficit_mean'], 2)} машин (из них в среднем {fmt(tot['n_outside_mean'], 2)} — "
+      "за окном, остальное — removed). Это прямое следствие отложенной рециркуляции: "
+      "n_window + n_outside = 4D − removed на каждом такте, но мгновенное n_window не обязано "
+      "равняться 4D − removed.")
+    a("")
+    a(f"Маршрут (п. 7.7): L(D) = {fmt(tot['L_target'], 2)} м; CompRate = {fmt(tot['comp_rate'], 3)}; "
+      f"Ttravel_pen = {fmt(tot['t_travel_pen'], 2)} с (недостигшим присваивается T_max = 40 с); "
+      f"t_reach_L = {fmt(tot['t_reach_L'], 2)} с по достигшим. Столкновения классифицированы "
+      "операционально модулем `experiments/h1.py` при ρ классификации плеча; «удар сзади» ниже — "
+      "отдельный описательный признак, а не замена категории.")
     ep_pick = next((i for i, c in enumerate(R["eval"]) if c["intercept"] or c["N_exec"]), 0)
     J = [r for r in R["journal"] if r["episode"] == ep_pick]
     pick = [r for r in J if r["k"] < 6 or r["intervention"] or r["crossed"]][:24]
@@ -747,18 +798,21 @@ def report(args, R):
     a("")
     a(table(["конфигурация", "фильтр", "награда", "эпизодов", "шагов", "E", "перехват",
              "TAKEOVER / ABORT / FALLBACK", "замена aπ", "R_int", "N_att", "N_att_rss", "N_blocked_rss",
-             "BLCR_rss", "N_exec", "столкновений", "CR", "из них удар сзади", "v_eff, м/с", "JerkRMS",
+             "BLCR_rss", "N_exec", "столкновений", "CR", "из них удар сзади", "v_eff, м/с",
+             "CompRate", "Ttravel_pen, с", "N_cutin", "JerkRMS",
              "Σ штрафа TTC", "Σ штрафа за столкновения"],
             [[m["arm"], m["filter"], m["reward"], m["episodes"], m["steps"], m["E"], m["intercept"],
               f"{m['takeover']} / {m['abort']} / {m['fallback']}", m["masked"], m["R_int"], m["N_att"],
               m["N_att_rss"], m["N_blocked_rss"], m["BLCR_rss"], m["N_exec"], m["crashes"], m["CR"],
-              m["crash_rear"], m["v_eff"], m["jerk_rms"],
-              m["ttc_pen"] if m["reward"] == "R_RS" else None,
+              m["crash_rear"], m["v_eff"], m["comp_rate"], m["t_travel_pen"], m["n_cutin"],
+              m["jerk_rms"], m["ttc_pen"] if m["reward"] == "R_RS" else None,
               m["col_pen"] if m["reward"] == "R_RS" else None] for m in R["arms"]]))
     a("")
-    a("«Удар сзади» — описательно: ближайший другой столкнувшийся автомобиль с боковым перекрытием "
-      "находится позади ego. Операциональная классификация столкновений п. 7.7 пилотом не "
-      "выполняется. Суммы штрафов R_RS приводятся для конфигураций с наградой R_RS.")
+    a("«Удар сзади» — описательный признак: ближайший другой столкнувшийся автомобиль с боковым "
+      "перекрытием находится позади ego. Операциональная классификация столкновений п. 7.7 "
+      "выполняется модулем `experiments/h1.py` при ρ классификации плеча (таблица H1 выше); "
+      "описательный признак её не заменяет. Суммы штрафов R_RS приводятся для конфигураций с "
+      "наградой R_RS.")
     a("")
     a("## 8. Смена полосы и ABORT на основном генераторе")
     a("")
@@ -781,7 +835,7 @@ def report(args, R):
     a(table(["D", "ρ, с", "эпизодов", "шагов", "E", "N_att_rss", "N_blocked_rss", "BLCR_rss", "N_busy",
              "нет полосы", "N_exec", "N_exec_int", "N_exec_other", "ABORT", "TAKEOVER", "FALLBACK",
              "ABORT проигнорирован (после пересечения)", "столкновений", "из них удар сзади",
-             "до T_max"], rows))
+             "достиг L(D)"], rows))
     a("")
     lc = [x for x in R.get("seek_lc", []) if x["lc_cmds"]]
     if lc:
@@ -863,6 +917,32 @@ def report(args, R):
           "впереди / сзади (у одной блокировки могут быть обе), busy — манёвр в процессе или в очереди, "
           "нет полосы — смена полосы за край дороги. Полная таблица по всем конфигурациям: `lc_grid.csv`.")
         a("")
+    p = R.get("pilot")
+    if p:
+        a("## 11. Приёмка пилота (трёхзначные статусы)")
+        a("")
+        a(f"Режим `{p['mode']}`: итог **{p['verdict']}**. `pass` — условие проверено и выполнено; "
+          "`fail` — нарушено; `unverified` — требуемый участок (например, переход с n > 1 после "
+          "предельного бюджета или ABORT у искателя) не встретился. В строгом режиме `unverified` "
+          "даёт `pilot:UNVERIFIED` и ненулевой код выхода.")
+        a("")
+        a(table(["проверка", "статус", "пояснение"],
+                [[k, v["status"], v.get("n", "")] for k, v in R.get("pilot_checks", {}).items()]))
+        a("")
+    sc = R.get("s_conv")
+    if sc is not None:
+        a("## 12. Сходимость по валидации (Sconv, п. 7.7)")
+        a("")
+        if sc["status"] == "insufficient_checkpoints":
+            a(f"Контрольных точек {len(R.get('val_history', []))} из {4} (валидация каждые 5000 шагов "
+              "решения, 20 сценариев 10 000–10 019, ε = 0). Пилот короче первого чекпойнта, поэтому "
+              "Sconv не проверяется: статус `insufficient_checkpoints`. Полный прогон основной серии "
+              "пишет `val_history.csv` и `s_conv.json` через `experiments.metrics.ValidationSchedule`.")
+        else:
+            a(f"Точек: {len(R.get('val_history', []))}; Sconv = {fmt(sc['s_conv'])}; "
+              f"бюджет достаточен: {fmt(sc['budget_sufficient'])}; статус `{sc['status']}`; "
+              f"максимум Δxval = {fmt(sc['x_max'], 2)} м.")
+        a("")
     a("## Время")
     a("")
     tm = R["timing"]
@@ -872,6 +952,42 @@ def report(args, R):
       f"прямой проход сети {tm['policy_ms']:.2f} мс, обучение {tm['learn_ms']:.1f} мс. "
       "Журнал машины: `journal.md`.")
     return "\n".join(L) + "\n"
+
+
+# ---------------------------------------------------------------------- acceptance
+def evaluate_pilot_status(checks, mode="strict"):
+    """Three-valued acceptance of the pilot: pass / fail / unverified for every check.
+    strict (default): OK only if every check is pass; fail or unverified exits non-zero.
+    diagnostic: never reports pilot:OK; unverified is allowed (exit 0) and is marked
+    DIAGNOSTIC_UNVERIFIED."""
+    valid = {"pass", "fail", "unverified"}
+    for name, info in checks.items():
+        if info.get("status") not in valid:
+            raise ValueError(f"invalid check status for {name}: {info!r}")
+    failed = [k for k, v in checks.items() if v["status"] == "fail"]
+    unverified = [k for k, v in checks.items() if v["status"] == "unverified"]
+    if mode == "strict":
+        if failed:
+            verdict, exit_ok = "pilot:FAIL", False
+        elif unverified:
+            verdict, exit_ok = "pilot:UNVERIFIED", False
+        else:
+            verdict, exit_ok = "pilot:OK", True
+    elif mode == "diagnostic":
+        if failed:
+            verdict, exit_ok = "pilot:DIAGNOSTIC_FAIL", False
+        elif unverified:
+            verdict, exit_ok = "pilot:DIAGNOSTIC_UNVERIFIED", True
+        else:
+            verdict, exit_ok = "pilot:DIAGNOSTIC_OK", True
+    else:
+        raise ValueError(f"unknown pilot mode: {mode!r}")
+    return {"mode": mode, "verdict": verdict, "strict_ok": verdict == "pilot:OK",
+            "exit_ok": exit_ok, "failed": failed, "unverified": unverified}
+
+
+def _status(ok, unverified=False):
+    return "pass" if ok else ("unverified" if unverified else "fail")
 
 
 # ---------------------------------------------------------------------- main
@@ -887,6 +1003,8 @@ def main(argv=None):
     p.add_argument("--base-steps", type=int, default=BASE_STEPS)
     p.add_argument("--base-learning-starts", type=int, default=BASE_LEARNING_STARTS)
     p.add_argument("--quick", action="store_true", help="smoke run: fewer seeds and steps")
+    p.add_argument("--mode", choices=("strict", "diagnostic"), default="strict",
+                   help="strict: OK only if every check is pass; diagnostic: never OK, unverified allowed")
     args = p.parse_args(argv)
     seeds = {k: list(v) for k, v in SEEDS.items()}
     if args.quick:
@@ -926,7 +1044,18 @@ def main(argv=None):
 
     t0 = time.perf_counter()
     log("[2/10] training (Proposed)")
-    agent, steps_log, episodes, t_train = train(args, seeds["train"], cache, log)
+    validation = ValidationSchedule()
+    agent, steps_log, episodes, t_train = train(args, seeds["train"], cache, log,
+                                                 validation=validation)
+    R["val_history"] = validation.history
+    R["s_conv"] = validation.s_conv()
+    if validation.history:
+        write_csv(out / "val_history.csv", validation.history)
+    else:
+        (out / "val_history.csv").write_text(
+            "step,n,delta_x_mean,delta_x_min,delta_x_max,n_att_mean,n_blocked_mean,"
+            "v_eff_mean,comp_rate\n", encoding="utf-8")
+    (out / "s_conv.json").write_text(to_json(R["s_conv"]), encoding="utf-8")
     write_csv(out / "train_episodes.csv", episodes)
     tot = totals(episodes)
     n_steps = max(tot["steps"], 1)
@@ -1027,21 +1156,39 @@ def main(argv=None):
     timing["phases"] = phases
     R["timing"] = timing
     R["vmax"] = dict(SPEED_SEEN)
+    clean = dict(start=0, inner=0, next=0)
+    multi = sum(v for k, v in R["check"]["hist"].items() if int(k) > 1)
+    baseline_ok = all(b["check"]["bad"] == clean and set(b["check"]["hist"]) == {1}
+                      and b["check"]["max_dR"] < 1e-9 for b in R["baselines"].values())
+    filtered = [R["train_total"]] + [m for m in R["arms"] if m["main_series"] is not None]
+    main_series = all(m["main_series"] for m in filtered)
+    checks = {
+        "warmup": {"status": _status(bool(R["warmup"]["passed"]))},
+        "buffer_consistency": {"status": _status(R["check"]["bad"] == clean
+                                                 and R["check"]["max_dR"] < 1e-9)},
+        "multistep_transitions": {"status": _status(multi > 0, unverified=agent.steps >= args.max_steps),
+                                  "n": multi, "steps": agent.steps},
+        "save_load": {"status": _status(R["saveload"]["dq"] == 0.0
+                                        and R["saveload"]["dqt"] == 0.0
+                                        and R["saveload"]["same_greedy"])},
+        "baselines": {"status": _status(baseline_ok)},
+        "N_exec_other": {"status": _status(R["train_total"]["N_exec_other"] == 0
+                                           and all(m["N_exec_other"] == 0 for m in R["arms"])
+                                           and all(t["N_exec_other"] == 0 for t in R["seek_total"]))},
+        "main_series": {"status": _status(main_series)},
+        "abort_seeker": {"status": _status(R["seek_abort"] is not None,
+                                           unverified=True)},
+    }
+    R["pilot"] = evaluate_pilot_status(checks, args.mode)
+    R["pilot_checks"] = checks
+    if multi == 0 and agent.steps < args.max_steps:
+        checks["multistep_transitions"]["status"] = "fail"
+        R["pilot"] = evaluate_pilot_status(checks, args.mode)
     (out / "report.md").write_text(report(args, R), encoding="utf-8")
     summary = {k: v for k, v in R.items() if k not in ("journal", "records")}
     summary["args"] = vars(args)
     summary["journal_machine"] = journal
     (out / "summary.json").write_text(to_json(summary), encoding="utf-8")
-    clean = dict(start=0, inner=0, next=0)
-    ok = (R["check"]["bad"] == clean and R["check"]["max_dR"] < 1e-9
-          and R["saveload"]["dq"] == 0.0 and R["saveload"]["dqt"] == 0.0
-          and all(b["check"]["bad"] == clean and set(b["check"]["hist"]) == {1}
-                  and b["check"]["max_dR"] < 1e-9 for b in R["baselines"].values())
-          and all(m["N_exec_other"] == 0 for m in R["arms"])
-          and all(t["N_exec_other"] == 0 for t in R["seek_total"]))
-    # the filter of the training and of every filtered evaluation arm is the main-series one
-    filtered = [R["train_total"]] + [m for m in R["arms"] if m["main_series"] is not None]
-    main_series = all(m["main_series"] for m in filtered)
     log("final counters (protocol 7.7; decision set of rss_shield.accounting):")
     log("  training Proposed: " + final_counters(R["train_total"]))
     for m in R["arms"]:
@@ -1054,9 +1201,9 @@ def main(argv=None):
         log(f"  {m['arm']}: episodes {s1['n']} correct starts {s1['n_valid']} crashes {s1['crashes']} "
             f"(CR_total {fmt(s1['CR_total'])}) rho_cls {s1['rho_cls']} H1 events {s1['h1_events']} "
             f"categories {to_json(s1['categories']).replace(chr(10), '')}")
-    ok = ok and main_series
-    log("pilot: " + ("OK" if ok else "CHECK FAILED"))
-    return 0 if ok else 1
+    log("pilot: " + R["pilot"]["verdict"])
+    log("  checks: " + ", ".join(f"{k}={v['status']}" for k, v in checks.items()))
+    return 0 if R["pilot"]["exit_ok"] else 1
 
 
 if __name__ == "__main__":

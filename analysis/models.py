@@ -21,7 +21,9 @@ chi-square LRT): signed likelihood root r = sign(beta_j) * sqrt(2 (l_full - l_nu
 one-sided p-value is its parametric-bootstrap tail under the fitted null model
 (bootstrap_signed_root).
 """
+import math
 from dataclasses import dataclass, field
+from typing import Literal
 
 import numpy as np
 from scipy import optimize, special
@@ -44,10 +46,101 @@ class Fit:
     converged: bool
     message: str = ""
     extra: dict = field(default_factory=dict)
+    converged_via: str = ""
 
     def coef(self, name):
         j = self.names.index(name)
         return float(self.beta[j]), float(self.se[j])
+
+
+@dataclass(frozen=True)
+class ConvergenceResult:
+    converged: bool
+    converged_via: Literal["optimizer_success", "stationary_gradient", "failed"]
+    opt_success: bool
+    max_abs_grad: float | None
+    pd_hess: bool
+    quad_diff: float | None
+    reason: str
+
+
+def check_lmm_convergence(*, opt_success, loglik, params, se, hess_free, sigma2,
+                          target_on_boundary=False):
+    """Strict LMM diagnostic (protocol 7.9): successful optimiser, finite estimates, sigma2 > 0,
+    positive SE, the tested coefficient not on a boundary and a positive-definite Hessian.
+    There is no gradient fallback for the one-dimensional profile likelihood."""
+    if not opt_success:
+        return ConvergenceResult(False, "failed", False, None, False, None, "optimizer_failed")
+    if not (math.isfinite(loglik) and math.isfinite(sigma2) and sigma2 > 0.0):
+        return ConvergenceResult(False, "failed", True, None, False, None,
+                                 "non_finite_or_zero_variance")
+    if not (np.all(np.isfinite(params)) and np.all(np.isfinite(se)) and np.all(se > 0.0)):
+        return ConvergenceResult(False, "failed", True, None, False, None,
+                                 "non_finite_params_or_se")
+    if target_on_boundary:
+        return ConvergenceResult(False, "failed", True, None, False, None, "target_on_boundary")
+    if hess_free.size == 0 or not np.all(np.isfinite(hess_free)):
+        return ConvergenceResult(False, "failed", True, None, False, None, "non_finite_hessian")
+    H = 0.5 * (hess_free + hess_free.T)
+    if not bool(np.all(np.linalg.eigvalsh(H) > 0.0)):
+        return ConvergenceResult(False, "failed", True, None, False, None, "non_pd_hessian")
+    return ConvergenceResult(True, "optimizer_success", True, None, True, None, "ok")
+
+
+def check_glmm_convergence(*, opt_success, loglik, params, se, grad_free, hess_free, quad_diff,
+                           has_events=True, target_on_boundary=False, kkt_boundary_ok=True,
+                           g_tol_success=1e-3, g_tol_fallback=1e-4, quad_tol=QUAD_TOL):
+    """Two-level GLMM diagnostic (protocol 7.9): structural invariants always, then either an
+    optimiser success with max|grad_free| <= 1e-3 or, when the optimiser reports failure, a
+    stationary gradient <= 1e-4.  A small gradient alone is not enough: the Hessian must be
+    positive definite, the active-bound KKT conditions must hold and quadrature must be stable."""
+    if not has_events:
+        return ConvergenceResult(False, "failed", opt_success, None, False, quad_diff, "no_events")
+    if not (math.isfinite(loglik) and np.all(np.isfinite(params)) and np.all(np.isfinite(se))
+            and np.all(se > 0.0)):
+        return ConvergenceResult(False, "failed", opt_success, None, False, quad_diff,
+                                 "non_finite_estimate")
+    if target_on_boundary:
+        return ConvergenceResult(False, "failed", opt_success, None, False, quad_diff,
+                                 "target_on_boundary")
+    if not (np.all(np.isfinite(grad_free)) and np.all(np.isfinite(hess_free))):
+        return ConvergenceResult(False, "failed", opt_success, None, False, quad_diff,
+                                 "non_finite_derivatives")
+    max_g = float(np.max(np.abs(grad_free))) if grad_free.size else 0.0
+    H = 0.5 * (hess_free + hess_free.T)
+    pd_hess = bool(np.all(np.linalg.eigvalsh(H) > 0.0))
+    if not pd_hess:
+        return ConvergenceResult(False, "failed", opt_success, max_g, False, quad_diff, "non_pd_hessian")
+    if not kkt_boundary_ok:
+        return ConvergenceResult(False, "failed", opt_success, max_g, True, quad_diff,
+                                 "kkt_boundary_violation")
+    if not (math.isfinite(quad_diff) and abs(quad_diff) < quad_tol):
+        return ConvergenceResult(False, "failed", opt_success, max_g, True, quad_diff,
+                                 "quadrature_instability")
+    if opt_success and max_g <= g_tol_success:
+        return ConvergenceResult(True, "optimizer_success", True, max_g, True, quad_diff, "ok")
+    if (not opt_success) and max_g <= g_tol_fallback:
+        return ConvergenceResult(True, "stationary_gradient", False, max_g, True, quad_diff,
+                                 "ok_stationary_gradient")
+    return ConvergenceResult(False, "failed", opt_success, max_g, True, quad_diff,
+                             "gradient_too_large_or_opt_failed")
+
+
+def bootstrap_lr_pvalue(r_obs, r_boot_converged, B_total, *, direction=-1, max_fail_frac=0.10):
+    """One-sided parametric-bootstrap p with the converged denominator B_conv + 1.  More than
+    10% failed replicates is an explicit model failure (p = 1.0 in Holm), never a silent drop."""
+    if B_total <= 0:
+        raise ValueError("B_total must be positive")
+    B_conv = len(r_boot_converged)
+    fail_frac = (B_total - B_conv) / float(B_total)
+    if B_conv == 0 or fail_frac > max_fail_frac:
+        return {"model_failed": True, "p_value": 1.0, "B": B_total, "B_conv": B_conv,
+                "fail_frac": fail_frac}
+    arr = np.asarray(r_boot_converged, dtype=float)
+    extreme = np.sum(direction * arr >= direction * r_obs - 1e-12)
+    p = float((1 + extreme) / (B_conv + 1))
+    return {"model_failed": False, "p_value": p, "B": B_total, "B_conv": B_conv,
+            "fail_frac": fail_frac}
 
 
 class Model:
@@ -113,9 +206,12 @@ class LMM(Model):
             lam = 0.0
         ll, beta, s2, A = profile(lam)
         se = np.sqrt(np.diag(s2 * np.linalg.inv(A)))
-        ok = bool(np.all(np.isfinite(beta)) and np.all(np.isfinite(se)) and np.isfinite(ll))
-        return Fit(self.names, beta, se, float(ll), float(np.sqrt(lam * s2)), float(np.sqrt(s2)), ok,
-                   "" if ok else "non-finite estimate")
+        conv = check_lmm_convergence(opt_success=bool(res.success), loglik=float(ll),
+                                     params=np.asarray(beta), se=np.asarray(se), hess_free=A,
+                                     sigma2=float(s2))
+        return Fit(self.names, beta, se, float(ll), float(np.sqrt(lam * s2)), float(np.sqrt(s2)),
+                   conv.converged, "" if conv.converged else conv.reason,
+                   converged_via=conv.converged_via)
 
     def simulate(self, fit, rng):
         u = rng.normal(0.0, fit.sigma_u, self.G)[self.g] if fit.sigma_u > 0 else 0.0
@@ -218,33 +314,48 @@ class GLMM(Model):
         if best is None:
             nan = np.full(p, np.nan)
             return Fit(self.names, nan, nan, float("nan"), float("nan"), float("nan"), False,
-                       "optimiser failed")
+                       "optimiser failed", converged_via="failed")
         theta = best.x
         free = [i for i in range(p + 2) if lo[i] + 1e-6 < theta[i] < hi[i] - 1e-6]
         H = _hessian(lambda t: self._nll(_put(theta, free, t), Q)[1][free], theta[free])
-        problems = [] if ok else [f"optimiser: {best.message}"]
+        grad_free = np.asarray(best.jac, float)[free]
         se = np.full(p, np.nan)
         ev = np.linalg.eigvalsh(H) if np.all(np.isfinite(H)) else np.array([np.nan])
-        if not (np.all(np.isfinite(ev)) and ev.min() > 1e-10 * max(1.0, ev.max())):
-            problems.append("Hessian is not positive definite")
-        else:
+        pd_hess = bool(np.all(np.isfinite(ev)) and ev.min() > 1e-10 * max(1.0, ev.max()))
+        if pd_hess:
             cov = np.linalg.inv(H)
             for k, i in enumerate(free):
                 if i < p:
                     se[i] = np.sqrt(cov[k, k])
         dq = abs(self._nll(theta, 2 * Q, grad=False) - best.fun)
-        if dq > QUAD_TOL:
-            problems.append(f"quadrature: {dq:.3g} log-lik units between {Q} and {2 * Q} nodes")
-        if not problems and not np.all(np.isfinite(se)):
-            problems.append("no standard error")
-        # no finite maximum: no events at all, a coefficient at its bound or not identified
-        if self._degenerate():
-            problems.append(self._degenerate())
-        elif np.any(np.abs(theta[:p]) > 30.0 - 1e-6) or np.any(se[np.isfinite(se)] > SE_MAX):
-            problems.append("a coefficient is not identified (estimate at the bound or huge standard error)")
+        at_lo = theta <= lo + 1e-6
+        at_hi = theta >= hi - 1e-6
+        kkt_ok = bool(np.all(best.jac[at_lo] >= -1e-6) and np.all(best.jac[at_hi] <= 1e-6))
+        target_boundary = bool(np.any(np.abs(theta[:p]) >= 30.0 - 1e-6)
+                               or np.any(se[np.isfinite(se)] > SE_MAX))
+        conv = check_glmm_convergence(opt_success=bool(best.success), loglik=-float(best.fun),
+                                      params=theta[:p], se=se, grad_free=grad_free,
+                                      hess_free=H, quad_diff=float(dq),
+                                      has_events=not bool(self._degenerate()),
+                                      target_on_boundary=target_boundary,
+                                      kkt_boundary_ok=kkt_ok)
+        problems = []
+        if not conv.converged:
+            problems.append(conv.reason)
+            if not best.success:
+                problems.append(f"optimiser: {best.message}")
+            if not pd_hess:
+                problems.append("Hessian is not positive definite")
+            if dq > QUAD_TOL:
+                problems.append(f"quadrature: {dq:.3g} log-lik units between {Q} and {2 * Q} nodes")
+            if self._degenerate():
+                problems.append(self._degenerate())
+        # the preliminary `ok` only stops the search for a second start; the final decision is
+        # conv, which enforces every invariant of protocol 7.9.
         return Fit(self.names, theta[:p].copy(), se, -float(best.fun), float(np.exp(theta[p + 1])),
-                   float(np.exp(theta[p])), not problems, "; ".join(problems),
-                   dict(su_at_bound=bool(p + 1 not in free), phi_at_bound=bool(p not in free)))
+                   float(np.exp(theta[p])), conv.converged, "; ".join(dict.fromkeys(problems)),
+                   dict(su_at_bound=bool(p + 1 not in free), phi_at_bound=bool(p not in free)),
+                   conv.converged_via)
 
     def _degenerate(self):
         return ""
@@ -322,16 +433,19 @@ def signed_root(full, null, name):
 
 def bootstrap_signed_root(model, name, direction, n_boot, rng, max_failed=0.1):
     """One-sided test of a coefficient. direction = -1: H1 beta < 0; +1: H1 beta > 0.
-    Returns a dict: estimate, se, root r, p_boot = (1 + #{r* at least as extreme}) / (B + 1) under
-    the parametric bootstrap from the fitted null model, p_wald (asymptotic, descriptive),
-    converged. Replicates whose fits do not converge are dropped and counted; more than
-    max_failed of them makes the test fail (converged = False, p_boot = None)."""
+    The p-value uses the converged denominator B_conv + 1 (protocol 7.9):
+    p = (1 + #{b in C : r*^(b) at least as extreme}) / (B_conv + 1), where C is the set of
+    converged replicates.  More than max_failed failed replicates is an explicit model failure
+    (converged = False, p_boot = None, p = 1 in Holm)."""
     full, null_model = model.fit(), model.drop(name)
     null = null_model.fit()
     out = dict(name=name, direction=direction, estimate=None, se=None, root=None, p_boot=None,
-               p_wald=None, n_boot=n_boot, n_failed=0, converged=False, message="",
+               p_wald=None, n_boot=n_boot, n_failed=0, B=n_boot, B_conv=0, fail_frac=None,
+               model_failed=False, converged=False, message="", converged_via=full.converged_via,
+               n_stationary_boot=0, stationary_share=None,
                sigma_u=full.sigma_u, scale=full.scale, loglik=full.loglik)
     if not (full.converged and null.converged):
+        out["model_failed"] = True
         out["message"] = "full: " + (full.message or "ok") + "; null: " + (null.message or "ok")
         if np.all(np.isfinite(full.beta)):
             out["estimate"], out["se"] = full.coef(name)
@@ -340,18 +454,24 @@ def bootstrap_signed_root(model, name, direction, n_boot, rng, max_failed=0.1):
     r = signed_root(full, null, name)
     out.update(estimate=est, se=se, root=r,
                p_wald=float(special.ndtr(-direction * est / se)) if se > 0 else None)
-    stats = []
+    stats, n_stationary = [], 0
     for _ in range(n_boot):
         m = model.with_y(null_model.simulate(null, rng))
         f1, f0 = m.fit(), m.drop(name).fit()
         if f1.converged and f0.converged:
             stats.append(signed_root(f1, f0, name))
+            if "stationary_gradient" in (f1.converged_via, f0.converged_via):
+                n_stationary += 1
         else:
             out["n_failed"] += 1
-    if n_boot and out["n_failed"] > max_failed * n_boot:
-        out["message"] = f"{out['n_failed']} of {n_boot} bootstrap fits failed"
+    out["n_stationary_boot"] = n_stationary
+    out["stationary_share"] = (n_stationary / len(stats)) if stats else None
+    bt = bootstrap_lr_pvalue(r, stats, n_boot, direction=direction, max_fail_frac=max_failed)
+    out.update(B=bt["B"], B_conv=bt["B_conv"], fail_frac=bt["fail_frac"],
+               model_failed=bt["model_failed"])
+    if bt["model_failed"]:
+        out["message"] = (f"{out['n_failed']} of {n_boot} bootstrap fits failed "
+                          f"({100 * bt['fail_frac']:.1f}%)")
         return out
-    stats = np.asarray(stats)
-    extreme = np.sum(direction * stats >= direction * r - 1e-12)
-    out.update(p_boot=float((1 + extreme) / (len(stats) + 1)), converged=True)
+    out.update(p_boot=float(bt["p_value"]), converged=True)
     return out

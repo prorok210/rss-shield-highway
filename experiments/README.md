@@ -11,10 +11,10 @@ semi-MDP-переходы с накоплением наград при пере
 | `h1.py` | единое определение события и корректного старта H1 (п. 6, 7.6, 7.7 протокола): правило старта при ρ = 1.0 с для всех плеч, ρ классификации плеча (ρ фильтра; ρref = 1.0 с без фильтра, в том числе Baseline 2), операциональная классификация столкновения по покадровой записи (`classify_collision`), событие H1, сводка `h1_summary` с CR_total отдельно от категорий |
 | `rewards.py` | награды R_v и R_S (раздел 2) |
 | `dqn.py` | DQN на NumPy: 2×256 ReLU, Adam, функция потерь Хьюбера, целевая сеть, цель с максимумом по A_safe(s′); буфер (s, a, R, s′, d, n, маска(s′)); сохранение и загрузка `.npz` |
-| `runner.py` | эпизод с фильтром: шаги политики и перехвата, сборка semi-MDP-переходов, счётчики E, N_att, N_blocked, N_att_int, N_exec, N_exec_int, R_int, BLCR, BLCR_rss (без блокировок busy и «нет полосы»: N_busy, N_no_lane), v_eff, JerkRMS; множество решений (шаги политики и перехвата, E, N_att, N_blocked, N_att_int) задано один раз в `rss_shield/accounting.py`; журнал шагов со статусами `policy_step`, `intervention`, `sup_cmd`, `block_reason`, `active_cmd`, `active_sup`, `brake_mode`, `return_active`, `fallback`, `abort_ignored` (те же имена, что в журнале `rss_shield/sim.py`) |
-| `pilot.py` | пилот (фильтр — только в конфигурации `MAIN_SERIES`; фактическая конфигурация каждого эпизода пишется в счётчики `shield_cfg` / `main_series`, и пилот не проходит, если она другая; в конце печатаются итоговые счётчики п. 7.7 по каждому плечу): прогрев, стартовые состояния, обучение, записи буфера до, во время и после перехвата, сохранение и загрузка модели, оценочный эпизод, итоговые счётчики, искатель перестроений (исполненные смены полосы и ABORT на основном генераторе при ρ = 0.1 и 0.6 с), диагностика бокового порога, доля тактов с допустимой сменой полосы по сетке D × ρ для четырёх конфигураций маски с причинами блокировки; отчёт `report.md` |
+| `runner.py` | эпизод с фильтром: шаги политики и перехвата, сборка semi-MDP-переходов, счётчики E, N_att, N_blocked, N_att_int, N_exec, N_exec_int, R_int, BLCR, BLCR_rss (без блокировок busy и «нет полосы»: N_busy, N_no_lane), v_eff, JerkRMS; плотность окна на старте и на всём эпизоде (`experiments/metrics.py`: n_window, n_outside, density_mean/min, n_deficit_mean), маршрут L(D) и t_reach_L, CompRate, Ttravel_pen, N_cutin; множество решений (шаги политики и перехвата, E, N_att, N_blocked, N_att_int) задано один раз в `rss_shield/accounting.py`; журнал шагов со статусами `policy_step`, `intervention`, `sup_cmd`, `block_reason`, `active_cmd`, `active_sup`, `brake_mode`, `return_active`, `fallback`, `abort_ignored` (те же имена, что в журнале `rss_shield/sim.py`); счётчики из CSV восстанавливаются строгими парсерами `accounting.counters_from_journal` |
+| `pilot.py` | пилот (фильтр — только в конфигурации `MAIN_SERIES`; фактическая конфигурация каждого эпизода пишется в счётчики `shield_cfg` / `main_series`, и пилот не проходит, если она другая; в конце печатаются итоговые счётчики п. 7.7 по каждому плечу): прогрев, стартовые состояния, обучение, записи буфера до, во время и после перехвата, сохранение и загрузка модели, оценочный эпизод, итоговые счётчики, искатель перестроений (исполненные смены полосы и ABORT на основном генераторе при ρ = 0.1 и 0.6 с), диагностика бокового порога, доля тактов с допустимой сменой полосы по сетке D × ρ для четырёх конфигураций маски с причинами блокировки; плотность/дефицит окна, L(D), CompRate, Ttravel_pen, N_cutin; приёмка — трёхзначные статусы `pass`/`fail`/`unverified` (`--mode strict` по умолчанию, `--mode diagnostic` — отдельный диагностический режим, который никогда не выдаёт `pilot:OK`); `ValidationSchedule` (20 сценариев 10 000–10 019 каждые 5000 шагов) пишет `val_history.csv` и `s_conv.json` (на коротком пилоте — `insufficient_checkpoints`); отчёт `report.md` |
 | `stats_pilot.py` | статистический пилот: таблица эпизодов по сетке D × ρ для Режимов А и Б и для плеча Baseline 2 (общие сиды эпизодов 900 300–900 303; политики без обучения) — вход для `python -m analysis.run`; зафиксированный прогон — `runs/pilot_run/stats/` |
-| `tests/` | 12 тестов правил H1 (`test_h1_rules.py`: граничные случаи события и старта для обоих плеч, порядок правил классификации), 13 тестов цепочки (включая проверку окна трафика по границе зоны п. 7.4 и огибающей скоростей) и регрессионный тест учёта смен полосы (`test_lane_change_accounting.py`: ego в крайней полосе, политика чередует смены полосы наружу и внутрь; 2 случая — правая и левая крайняя полоса) |
+| `tests/` | 40 тестов: правила H1 (`test_h1_rules.py`: граничные случаи события и старта для обоих плеч, порядок правил классификации), цепочка обучения (включая проверку окна трафика по границе зоны п. 7.4 и огибающей скоростей), учёт смен полосы (`test_lane_change_accounting.py`: ego в крайней полосе, политика чередует смены полосы наружу и внутрь; 2 случая — правая и левая крайняя полоса) и метрики/приёмка (`test_metrics.py`: плотность и дефицит окна, L(D)/t_reach_L, N_cutin, S_conv, расписание валидации с агрегатами aπ, трёхзначный статус пилота) |
 
 Тип шага (политики или перехвата) задаётся тактом решения, а не командой, активной в течение шага.
 Пересечение разметки (N_exec) относится к шагу решения, чья команда действительно изменила
@@ -29,14 +29,14 @@ semi-MDP-переходы с накоплением наград при пере
 ego). Поэтому N_exec считается на той же экспозиции E, что и N_att; N_exec_int — пересечения,
 физически пришедшиеся на активную супервизорную команду, — приводится отдельно и входит в N_exec.
 
-DQN написан на NumPy, поэтому зависимости обучения совпадают с `requirements.txt`; отдельный
-`requirements-train.txt` не нужен. Градиенты проверяются конечными разностями в тестах.
+DQN написан на NumPy, поэтому зависимости обучения совпадают с единым `requirements.txt`;
+отдельный файл зависимостей обучения не требуется. Градиенты проверяются конечными разностями в тестах.
 
 ## Статистический план на данных пилота
 
 ```bash
 python -m experiments.stats_pilot --out runs/pilot_run/stats
-python -m analysis.run --episodes runs/pilot_run/stats/episodes.csv --out runs/pilot_run/stats --boot 199 --boot-sens 999 --boot-diff 2000
+python -m analysis.run --episodes runs/pilot_run/stats/episodes.csv --out runs/pilot_run/stats --design pilot --boot 199 --boot-sens 999 --boot-diff 2000
 python -m analysis.power --starts runs/pilot_run/start_states.csv | awk '/^# Power of H1a/{n++} n==2' > runs/pilot_run/stats/power.md
 ```
 
@@ -50,8 +50,8 @@ python -m analysis.power --starts runs/pilot_run/start_states.csv | awk '/^# Pow
 
 ```bash
 python -m pytest -q experiments/tests
-python -m experiments.pilot --out runs/pilot_local            # пилот раздела 8
-python -m experiments.pilot --out runs/pilot_quick --quick    # укороченный вариант для отладки
+python -m experiments.pilot --out runs/pilot_local            # пилот раздела 8, --mode strict
+python -m experiments.pilot --out runs/pilot_quick --quick --mode diagnostic
 ```
 
 В CI пилот запускает `.github/workflows/pilot.yml`; `report.md` и остальные файлы пилота — в артефакте запуска. Модели `.npz` в git не кладутся. Если запуск CI не состоялся,

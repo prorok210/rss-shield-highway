@@ -61,6 +61,8 @@ from rss_shield.params import ACTION_INDEX, ACTIONS, DT, DT_DECISION, LENGTH, WI
 from rss_shield.shield import MAIN_SERIES, RSSShield, ShieldConfig, describe, is_main_series
 from experiments import h1
 from experiments.generator import queued_command
+from experiments.metrics import (CutInTracker, DensityTracker, RouteProgressTracker, VehSnap,
+                                 target_distance_L)
 from experiments.rewards import step_reward
 
 JERK_JUMP = 50.0      # m/s^3: a frame with |da|/dt above this is counted as a jump (diagnostics)
@@ -148,98 +150,140 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
              crash_intercept=False, crash_sup_active=False, crash_rear=False,
              t_policy=0.0, t_shield=0.0, t_env=0.0, t_learn=0.0)
     x0, lane_prev = float(ego.position[0]), ego.lane_index[2]
+    D = float(env.config.get("D", 0)) if hasattr(env, "config") else 0.0
+    duration = float(env.config.get("duration", 40.0)) if hasattr(env, "config") else 40.0
+    info_start = getattr(env, "start_info", None) or {}
+    density = None
+    if D > 0 and hasattr(env, "_window"):
+        try:
+            density = DensityTracker(int(D), int(info_start.get("removed", 0)),
+                                     int(env.config["lanes_count"]), 1.0)
+            density.record(len(env._window(float(ego.position[0]), exclude=ego)), is_start=True)
+        except (KeyError, AttributeError, ValueError):
+            density = None
+    route = RouteProgressTracker(x0, target_distance_L(D, duration), duration) if D > 0 else None
+    cutin = CutInTracker(rho_eval=rho if shield_on else h1.RHO_REF)
+    frame_no = 0
+    road_step = env.road.step
+
+    def _snap(v):
+        return VehSnap(vid=id(v), lane=int(v.lane_index[2]), target_lane=int(v.target_lane_index[2]),
+                       x=float(v.position[0]), y=float(v.position[1]), vx=float(v.speed),
+                       vy=float(v.speed * np.sin(v.heading)))
+
+    def _metrics_hook(dt):
+        nonlocal frame_no
+        road_step(dt)
+        frame_no += 1
+        if route is not None:
+            route.update_frame(frame_no * DT, float(ego.position[0]), bool(ego.crashed))
+        cutin.update_frame(frame_no, _snap(ego),
+                           [_snap(v) for v in env.road.vehicles if v is not ego],
+                           return_active=bool(ego.return_active))
+
+    cutin.update_frame(0, _snap(ego),
+                       [_snap(v) for v in env.road.vehicles if v is not ego],
+                       return_active=bool(ego.return_active))
+    env.road.step = _metrics_hook
     frames = h1.FrameRecorder(env) if classify else None
     in_fifo = {}                    # FIFO exit frame -> (decision step, policy step) of the command
     open_lc = []                    # lane changes started, not crossed yet: (step or None, direction)
     del ego.acc_log[:]
     k, term, trunc = 0, False, False
-    while not (term or trunc):
-        t0 = time.perf_counter()
-        q = np.asarray(agent.q_values(obs), dtype=float)
-        a_pi = NAMES[int(np.argmax(q))]
-        pref = agent.rng.random(len(NAMES)) if explore and agent.rng.random() < agent.epsilon() else q
-        a_pref = NAMES[int(np.argmax(pref))]
-        t1 = time.perf_counter()
-        if shield is not None:
-            dec = shield.decide(a_pref, {n: float(pref[i]) for i, n in enumerate(NAMES)})
-            cmd, mask, reason = dec.command, np.asarray(dec.mask, bool), dec.reason
-        else:
-            cmd, mask, reason = a_pref, np.ones(len(NAMES), bool), "no_filter"
-        t2 = time.perf_counter()
-        why = dec.violations.get(a_pi) if shield is not None else None
-        policy = count_step(c, a_pi, cmd, mask, why) == POLICY
-        if policy and asm is not None:
-            asm.policy_step(obs, mask, ACTION_INDEX[cmd], meta=(episode, k))
-        queued = queued_command(ego)
-        in_fifo[ego.frame + ego.k_tau] = (k, policy)
-        target_prev = ego.target_lane_index[2]
-        if frames is not None:
-            frames.decision(cmd)
-        obs2, _, term, trunc, _ = env.step(cmd)
-        t3 = time.perf_counter()
-        r, parts = step_reward(reward_kind, ego, env.road)
-        c["ret"] += r
-        c["ttc_events"] += int(parts.get("ttc_pen", 0.0) > 0)
-        c["ttc_pen"] += float(parts.get("ttc_pen", 0.0))
-        c["col_pen"] += float(parts.get("col_pen", 0.0))
-        if asm is not None:
-            asm.reward(r)
-        # commands that left the FIFO during this step (K_TAU = FRAMES_PER_DECISION: the command of
-        # the previous decision step, on the first frame, i.e. before any crossing of this step)
-        left = [in_fifo.pop(f) for f in sorted(in_fifo) if f < ego.frame]
-        target_now = ego.target_lane_index[2]
-        if target_now != target_prev:
-            d, n = int(np.sign(target_now - lane_prev)), abs(target_now - lane_prev)
-            if open_lc and open_lc[-1][1] != d:
-                del open_lc[:]          # reversal before the crossing: cancelled, as by ABORT
-            del open_lc[n:]
-            if len(open_lc) < n:
-                src = left[-1] if left else (None, False)
-                open_lc.append((src[0] if src[1] else None, d))
-        lane_now = ego.lane_index[2]
-        crossed = lane_now != lane_prev
-        exec_from = ""
-        if crossed:
-            rec = (open_lc.pop(0) if open_lc and open_lc[0][1] == np.sign(lane_now - lane_prev)
-                   else None)
-            if rec is not None and rec[0] is not None:
-                exec_from = rec[0]
-                c["N_exec"] += 1
-                c["N_exec_int"] += int(ego.sup_active)
+    try:
+        while not (term or trunc):
+            t0 = time.perf_counter()
+            q = np.asarray(agent.q_values(obs), dtype=float)
+            a_pi = NAMES[int(np.argmax(q))]
+            pref = agent.rng.random(len(NAMES)) if explore and agent.rng.random() < agent.epsilon() else q
+            a_pref = NAMES[int(np.argmax(pref))]
+            t1 = time.perf_counter()
+            if shield is not None:
+                dec = shield.decide(a_pref, {n: float(pref[i]) for i, n in enumerate(NAMES)})
+                cmd, mask, reason = dec.command, np.asarray(dec.mask, bool), dec.reason
             else:
-                c["N_exec_other"] += 1
-        lane_prev = lane_now
-        if term and ego.crashed:
-            c["crashed"] = True
-            c["crash_intercept"] = not policy
-            c["crash_sup_active"] = bool(ego.sup_active)
-            c["crash_rear"] = rear_contact(ego, env.road)
-        row = dict(episode=episode, k=k, t=round(k * DT_DECISION, 1), a_pi=a_pi, command=cmd,
-                   policy_step=int(policy), intervention=int(not policy),
-                   sup_cmd="" if policy else cmd, reason=reason,
-                   mask=mask_str(mask), block_reason=block_reason(a_pi, mask, why) if policy else "",
-                   queued=queued or "", active_cmd=ego.active_cmd or "",
-                   active_sup=int(ego.sup_active), brake_mode=int(ego.brake_mode),
-                   return_active=int(ego.return_active), fallback=int(bool(ego.fallback)),
-                   abort_ignored=int(ego.abort_ignored), lane=int(lane_now),
-                   target_lane=int(ego.target_lane_index[2]), crossed=int(crossed),
-                   exec_from=exec_from,
-                   x=round(float(ego.position[0]), 3), v=round(float(ego.speed), 3), r=r,
-                   crashed=int(ego.crashed))
-        if steps_log is not None:
-            steps_log.append(row)
-        if journal is not None:
-            journal.append(row)
-        t4 = time.perf_counter()
-        if train:
-            agent.on_env_step()
-        t5 = time.perf_counter()
-        c["t_policy"] += t1 - t0
-        c["t_shield"] += t2 - t1
-        c["t_env"] += t3 - t2
-        c["t_learn"] += t5 - t4
-        k += 1
-        obs = obs2
+                cmd, mask, reason = a_pref, np.ones(len(NAMES), bool), "no_filter"
+            t2 = time.perf_counter()
+            why = dec.violations.get(a_pi) if shield is not None else None
+            policy = count_step(c, a_pi, cmd, mask, why) == POLICY
+            if policy and asm is not None:
+                asm.policy_step(obs, mask, ACTION_INDEX[cmd], meta=(episode, k))
+            queued = queued_command(ego)
+            in_fifo[ego.frame + ego.k_tau] = (k, policy)
+            target_prev = ego.target_lane_index[2]
+            if frames is not None:
+                frames.decision(cmd)
+            obs2, _, term, trunc, _ = env.step(cmd)
+            if density is not None:
+                density.record(len(env._window(float(ego.position[0]), exclude=ego)))
+            t3 = time.perf_counter()
+            r, parts = step_reward(reward_kind, ego, env.road)
+            c["ret"] += r
+            c["ttc_events"] += int(parts.get("ttc_pen", 0.0) > 0)
+            c["ttc_pen"] += float(parts.get("ttc_pen", 0.0))
+            c["col_pen"] += float(parts.get("col_pen", 0.0))
+            if asm is not None:
+                asm.reward(r)
+            # commands that left the FIFO during this step (K_TAU = FRAMES_PER_DECISION: the command of
+            # the previous decision step, on the first frame, i.e. before any crossing of this step)
+            left = [in_fifo.pop(f) for f in sorted(in_fifo) if f < ego.frame]
+            target_now = ego.target_lane_index[2]
+            if target_now != target_prev:
+                d, n = int(np.sign(target_now - lane_prev)), abs(target_now - lane_prev)
+                if open_lc and open_lc[-1][1] != d:
+                    del open_lc[:]          # reversal before the crossing: cancelled, as by ABORT
+                del open_lc[n:]
+                if len(open_lc) < n:
+                    src = left[-1] if left else (None, False)
+                    open_lc.append((src[0] if src[1] else None, d))
+            lane_now = ego.lane_index[2]
+            crossed = lane_now != lane_prev
+            exec_from = ""
+            if crossed:
+                rec = (open_lc.pop(0) if open_lc and open_lc[0][1] == np.sign(lane_now - lane_prev)
+                       else None)
+                if rec is not None and rec[0] is not None:
+                    exec_from = rec[0]
+                    c["N_exec"] += 1
+                    c["N_exec_int"] += int(ego.sup_active)
+                else:
+                    c["N_exec_other"] += 1
+            lane_prev = lane_now
+            if term and ego.crashed:
+                c["crashed"] = True
+                c["crash_intercept"] = not policy
+                c["crash_sup_active"] = bool(ego.sup_active)
+                c["crash_rear"] = rear_contact(ego, env.road)
+            row = dict(episode=episode, k=k, t=round(k * DT_DECISION, 1), a_pi=a_pi, command=cmd,
+                       policy_step=int(policy), intervention=int(not policy),
+                       sup_cmd="" if policy else cmd, reason=reason,
+                       mask=mask_str(mask), block_reason=block_reason(a_pi, mask, why) if policy else "",
+                       queued=queued or "", active_cmd=ego.active_cmd or "",
+                       active_sup=int(ego.sup_active), brake_mode=int(ego.brake_mode),
+                       return_active=int(ego.return_active), fallback=int(bool(ego.fallback)),
+                       abort_ignored=int(ego.abort_ignored), lane=int(lane_now),
+                       target_lane=int(ego.target_lane_index[2]), crossed=int(crossed),
+                       exec_from=exec_from,
+                       x=round(float(ego.position[0]), 3), v=round(float(ego.speed), 3), r=r,
+                       crashed=int(ego.crashed))
+            if steps_log is not None:
+                steps_log.append(row)
+            if journal is not None:
+                journal.append(row)
+            t4 = time.perf_counter()
+            if train:
+                agent.on_env_step()
+            t5 = time.perf_counter()
+            c["t_policy"] += t1 - t0
+            c["t_shield"] += t2 - t1
+            c["t_env"] += t3 - t2
+            c["t_learn"] += t5 - t4
+            k += 1
+            obs = obs2
+    finally:
+        if frames is not None:
+            frames.close()
+        env.road.step = road_step
     if asm is not None:
         mask_T = None
         if not term:
@@ -258,14 +302,26 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
     else:
         c["jerk_jump_share"], c["jerk_rms_smooth"] = 0.0, 0.0
     c["frames"] = int(a.size)
-    c["dx"] = float(ego.position[0] - x0)
-    c["v_eff"] = c["dx"] / float(env.config["duration"])
+    if route is not None:
+        c.update(route.summary(c["crashed"], float(ego.position[0])))
+    else:
+        c.update(dict(L_target=None, delta_x=float(ego.position[0] - x0),
+                      v_eff=float((ego.position[0] - x0) / duration), survived=not c["crashed"],
+                      reached_L=None, completed=bool(trunc and not term), t_reach_L=None,
+                      t_travel_pen=duration))
+    if density is not None:
+        c.update(density.summary())
+    else:
+        c.update(dict(D_nominal=None, n_removed=None, n_window_start=None, n_outside_start=None,
+                      density_start=None, density_mean=None, density_min=None,
+                      n_outside_mean=None, n_outside_max=None, n_deficit_mean=None))
+    c.update(cutin.summary())
+    c["dx"] = float(c["delta_x"])
     c["BLCR"] = c["N_blocked"] / c["N_att"] if c["N_att"] else None
     c["N_att_rss"] = c["N_att"] - c["N_busy"] - c["N_no_lane"]
     c["N_blocked_rss"] = c["N_blocked"] - c["N_busy"] - c["N_no_lane"]
     c["BLCR_rss"] = c["N_blocked_rss"] / c["N_att_rss"] if c["N_att_rss"] else None
     c["R_int"] = (c["masked"] + c["intercept"]) / c["steps"] if c["steps"] else 0.0
-    c["completed"] = bool(trunc and not term)
     c["abort_ignored"] = int(ego.abort_ignored)
     info = getattr(env, "start_info", None) or {}
     c["removed"], c["insert_ok"] = info.get("removed"), info.get("insert_ok")
@@ -276,11 +332,9 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
     c["rho_cls"] = h1.classification_rho(shield is not None, rho)
     c["correct_start"] = h1.correct_start(info) if "unsafe_lane" in info else None
     c["crash_category"] = None
-    if frames is not None:
-        frames.close()
-        if c["crashed"]:
-            trace = frames.trace()
-            c["crash_category"] = h1.CR_UNC if trace is None else h1.classify_collision(trace, c["rho_cls"])
+    if frames is not None and c["crashed"]:
+        trace = frames.trace()
+        c["crash_category"] = h1.CR_UNC if trace is None else h1.classify_collision(trace, c["rho_cls"])
     c["h1_event"] = (h1.is_h1_event(c["correct_start"], c["crashed"], c["crash_category"])
                      if classify else None)
     # filter configuration of the episode: main_series is None without the filter
