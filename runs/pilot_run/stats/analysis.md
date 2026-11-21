@@ -2,7 +2,7 @@
 
 Design mode: **pilot** (diagnostic: the pre-registered design completeness is not enforced).
 
-Input: `runs/pilot_run/stats/episodes.csv`, 168 episodes. Parametric bootstrap: 199 replicates (the plan requires at least 1000 for the main series); two-way cluster bootstrap: 999; H1 difference: 2000. Pilot policies are not trained: the numbers show that every step of the plan is computed, not that H1-H3 hold.
+Input: `runs/pilot_run/stats/episodes.csv`, 168 episodes. Parametric bootstrap: 199 replicates; two-way cluster bootstrap: 999; H1 difference: 2000. Pilot policies are not trained: the numbers show that every step of the plan is computed, not that H1-H3 hold.
 
 ## H1: checks on episodes with a correct start
 
@@ -70,17 +70,17 @@ Descriptive difference CR_ego_op(Proposed, mode B) − CR_ego_op(Baseline 2) on 
 
 Covariates: Dc = (D − 25) / 10, rhoc = rho − 2/3 (grid means), mode = 1 for mode B. One-sided p: parametric bootstrap of the signed likelihood root under the null model; Holm over the seven checks in each analysis; sensitivity: two-way cluster bootstrap that keeps shared scenario ids.
 
-| check | function | model | estimate | SE | signed root | p (bootstrap) | B / B_conv | p Holm | converged (via) | sens. estimate | sens. 95 % interval | sens. p | sens. p Holm | outcome |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| H2: v_eff ~ rho | `h2_veff_rho` | M1 LMM | -1.6751 | 4.9762 | -0.3361 | 0.3800 | 199 / 199 | 1.0000 | yes (optimizer_success) | -1.6751 | [-11.1639; 7.8986] | 0.3320 | 1.0000 | not established (primary analysis) |
-| H2: v_eff ~ D | `h2_veff_D` | M1 LMM | -3.6376 | 1.0135 | -3.1171 | 0.0050 | 199 / 199 | 0.0350 | yes (optimizer_success) | -3.6376 | [-5.7231; -1.3280] | 0.0010 | 0.0070 | established |
-| H2: v_eff ~ D x rho | `h2_veff_Dxrho` | M1 LMM | -0.9502 | 4.0630 | -0.2337 | 0.4100 | 199 / 199 | 1.0000 | yes (optimizer_success) | -0.9502 | [-10.8560; 8.9446] | 0.3600 | 1.0000 | not established (primary analysis) |
-| H2: N_exec ~ rho | `h2_nexec_rho` | M2 NB2-GLMM | -0.9782 | 0.8307 | -1.2281 | 0.1452 | 199 / 185 | 0.8710 | yes (stationary_gradient) | -0.4468 | [-1.7182; 0.9050] | 0.2480 | 1.0000 | not established (primary analysis) |
-| H2: N_exec ~ D | `h2_nexec_D` | M2 NB2-GLMM | 0.3436 | 0.1558 | 2.2624 | 0.9895 | 199 / 189 | 1.0000 | yes (stationary_gradient) | 0.4216 | [0.1023; 0.7531] | 0.9900 | 1.0000 | not established (direction) |
-| H3a: N_blocked ~ mode | `h3a_nblocked_mode` | M3 NB2-GLMM | 0.1555 | 0.0824 | 1.8155 | 0.9436 | 199 / 194 | 1.0000 | yes (optimizer_success) | 0.1552 | [-0.0045; 0.3187] | 0.9690 | 1.0000 | not established (direction) |
-| H3b: P(block ∣ attempt) ~ mode | `h3b_pblock_mode` | M4 beta-binomial GLMM | 0.4640 | 0.2464 | 1.8102 | 0.9543 | 199 / 196 | 1.0000 | yes (optimizer_success) | 0.5047 | [-0.3551; 1.1873] | 0.8990 | 1.0000 | not established (direction) |
+| check | function | model | estimate | SE | signed root | p (bootstrap) | B / B_conv | stationary share | p Holm | converged (via) | sens. estimate | sens. 95 % interval | sens. p | sens. p Holm | outcome |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| H2: v_eff ~ rho | `h2_veff_rho` | M1 LMM | -1.6751 | 4.9762 | -0.3361 | 0.3800 | 199 / 199 | 0.000 | 1.0000 | yes (optimizer_success) | -1.6751 | [-11.1639; 7.8986] | 0.3320 | 1.0000 | not established (primary analysis) |
+| H2: v_eff ~ D | `h2_veff_D` | M1 LMM | -3.6376 | 1.0135 | -3.1171 | 0.0050 | 199 / 199 | 0.000 | 0.0350 | yes (optimizer_success) | -3.6376 | [-5.7231; -1.3280] | 0.0010 | 0.0070 | established |
+| H2: v_eff ~ D x rho | `h2_veff_Dxrho` | M1 LMM | -0.9502 | 4.0630 | -0.2337 | 0.4100 | 199 / 199 | 0.000 | 1.0000 | yes (optimizer_success) | -0.9502 | [-10.8560; 8.9446] | 0.3600 | 1.0000 | not established (primary analysis) |
+| H2: N_exec ~ rho | `h2_nexec_rho` | M2 NB2-GLMM | -0.9782 | 0.8307 | -1.2281 | 0.1452 | 199 / 185 | 0.535 | 0.8710 | yes (stationary_gradient) | -0.4468 | [-1.7182; 0.9050] | 0.2480 | 1.0000 | not established (primary analysis) |
+| H2: N_exec ~ D | `h2_nexec_D` | M2 NB2-GLMM | 0.3436 | 0.1558 | 2.2624 | 0.9895 | 199 / 189 | 0.418 | 1.0000 | yes (stationary_gradient) | 0.4216 | [0.1023; 0.7531] | 0.9900 | 1.0000 | not established (direction) |
+| H3a: N_blocked ~ mode | `h3a_nblocked_mode` | M3 NB2-GLMM | 0.1555 | 0.0824 | 1.8155 | 0.9436 | 199 / 194 | 0.000 | 1.0000 | yes (optimizer_success) | 0.1552 | [-0.0045; 0.3187] | 0.9690 | 1.0000 | not established (direction) |
+| H3b: P(block ∣ attempt) ~ mode | `h3b_pblock_mode` | M4 beta-binomial GLMM | 0.4640 | 0.2464 | 1.8102 | 0.9543 | 199 / 196 | 0.046 | 1.0000 | yes (optimizer_success) | 0.5047 | [-0.3551; 1.1873] | 0.8990 | 1.0000 | not established (direction) |
 
-Control (outside the family) `control_natt_mode`, M5: estimate 0.1482, SE 0.0804, one-sided bootstrap p 0.9492, converged: True.
+Control (outside the family) `control_natt_mode`, M5: estimate 0.1482, SE 0.0804, one-sided bootstrap p 0.9492, B/B_conv 199/196, converged: True (optimizer_success), stationary share 0.000.
 
 Excluded episodes: E = 0: 0; N_att = 0 (only from M4): 0 of 144.
 

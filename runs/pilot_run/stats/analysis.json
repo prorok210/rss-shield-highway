@@ -933,6 +933,8 @@
     "converged": true,
     "message": "",
     "converged_via": "optimizer_success",
+    "n_stationary_boot": 0,
+    "stationary_share": 0.0,
     "sigma_u": 5.159967218395185,
     "scale": 2.1058347462467437,
     "loglik": -184.75856688976995
@@ -972,6 +974,8 @@
     "converged": true,
     "message": "",
     "converged_via": "optimizer_success",
+    "n_stationary_boot": 0,
+    "stationary_share": 0.0,
     "sigma_u": 5.159967218395185,
     "scale": 2.1058347462467437,
     "loglik": -184.75856688976995
@@ -1011,6 +1015,8 @@
     "converged": true,
     "message": "",
     "converged_via": "optimizer_success",
+    "n_stationary_boot": 0,
+    "stationary_share": 0.0,
     "sigma_u": 5.159967218395185,
     "scale": 2.1058347462467437,
     "loglik": -184.75856688976995
@@ -1050,6 +1056,8 @@
     "converged": true,
     "message": "",
     "converged_via": "stationary_gradient",
+    "n_stationary_boot": 99,
+    "stationary_share": 0.5351351351351351,
     "sigma_u": 0.00033546262790251185,
     "scale": 162754.79141900392,
     "loglik": -60.68520168399104
@@ -1089,6 +1097,8 @@
     "converged": true,
     "message": "",
     "converged_via": "stationary_gradient",
+    "n_stationary_boot": 79,
+    "stationary_share": 0.41798941798941797,
     "sigma_u": 0.00033546262790251185,
     "scale": 162754.79141900392,
     "loglik": -60.68520168399104
@@ -1128,6 +1138,8 @@
     "converged": true,
     "message": "",
     "converged_via": "optimizer_success",
+    "n_stationary_boot": 0,
+    "stationary_share": 0.0,
     "sigma_u": 0.1696196887387153,
     "scale": 162754.79141900392,
     "loglik": -523.7226912426103
@@ -1167,6 +1179,8 @@
     "converged": true,
     "message": "",
     "converged_via": "optimizer_success",
+    "n_stationary_boot": 9,
+    "stationary_share": 0.04591836734693878,
     "sigma_u": 0.3898586289509982,
     "scale": 162754.79141900392,
     "loglik": -181.70532545091172
@@ -1201,6 +1215,8 @@
   "converged": true,
   "message": "",
   "converged_via": "optimizer_success",
+  "n_stationary_boot": 0,
+  "stationary_share": 0.0,
   "sigma_u": 0.16527616421137162,
   "scale": 162754.79141900392,
   "loglik": -523.0644798636788

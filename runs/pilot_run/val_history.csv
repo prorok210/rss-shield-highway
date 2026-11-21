@@ -1,1 +1,1 @@
-step,n,delta_x_mean,delta_x_min,delta_x_max
+step,n,delta_x_mean,delta_x_min,delta_x_max,n_att_mean,n_blocked_mean,v_eff_mean,comp_rate
