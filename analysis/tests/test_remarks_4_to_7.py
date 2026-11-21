@@ -54,6 +54,13 @@ def test_design_completeness_rejects_a_missing_cell():
         validate_design_completeness(rows, SMALL)
 
 
+def test_design_completeness_rejects_unexpected_density():
+    rows = _design_rows()
+    rows.append(dict(rows[0], D=20, unit="X:20:0", episode_seed=1))
+    with pytest.raises(DesignCompletenessError):
+        validate_design_completeness(rows, SMALL)
+
+
 def test_baseline2_rho_is_ignored_by_normalisation():
     rows = _design_rows()
     for r in rows:
@@ -70,6 +77,16 @@ def test_paired_bootstrap_is_exact_on_identical_vectors():
     assert r["diff"] == 0.0 and r["ci_low"] == 0.0 and r["ci_high"] == 0.0
     assert r["n_common_scenarios"] == 3 and r["n_extra_b2_excluded"] == 1
     assert r["n_extra_prop_excluded"] == 0
+
+
+def test_paired_bootstrap_exact_for_5x50_identical_vectors():
+    # the teacher's counterexample: five trained units per arm, one shared 0/1 vector of 50 events
+    vec = {s: int(s % 3 == 0) for s in range(50)}
+    prop = {u: dict(vec) for u in range(5)}
+    base = {u: dict(vec) for u in range(5)}
+    r = B.bootstrap_h1_diff_twoway(prop, base, n_boot=200, seed=11)
+    assert r["diff"] == 0.0 and r["ci_low"] == 0.0 and r["ci_high"] == 0.0
+    assert r["n_common_scenarios"] == 50 and r["n_units_proposed"] == 5
 
 
 def test_paired_bootstrap_rejects_inconsistent_scenario_sets():

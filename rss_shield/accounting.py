@@ -60,9 +60,9 @@ def new_counters():
 
 
 def is_action_masked(policy_step, a_pi, command):
-    """A policy step is masked iff the policy asked for a lane change and the executed command
-    differs from it.  A missing request or a missing command is not a masking: the same rule is
-    used by count_step and by counters_from_journal (protocol 7.7, R_int)."""
+    """A policy step is masked iff the executed command differs from the policy request a_pi.
+    This is not limited to lane changes.  A missing request or a missing command is not a
+    masking; the same rule is used by count_step and by counters_from_journal (protocol 7.7)."""
     return bool(policy_step and a_pi is not None and command is not None and command != a_pi)
 
 
@@ -163,6 +163,11 @@ def counters_from_journal(rows):
             raise ValueError("exactly one of policy_step and intervention must be True")
         a_pi = _parse_optional_str(r.get("a_pi"))
         command = _journal_command(r, policy)
+        expected = POLICY if policy else INTERVENTION
+        if step_kind(command) != expected:
+            raise ValueError(
+                f"inconsistent journal row: policy_step={policy}, intervention={intervention}, "
+                f"command={command!r} (expected a {expected} command)")
         mask = _parse_mask(r.get("mask"))
         reason = _parse_optional_str(r.get("block_reason"))
         if reason is None and not policy:

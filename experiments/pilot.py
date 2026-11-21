@@ -194,7 +194,7 @@ def start_summary(D, infos):
                 unsafe_a={r: sum(1 for i in infos if i["unsafe"][r]) for r in RHOS},
                 unsafe_b={r: sum(1 for i in infos if i["unsafe_lane"][r]) for r in RHOS},
                 density=float(np.mean([i["density"] for i in infos])),
-                n_window=n_window, n_deficit=float(4 * D - mean_removed - n_window),
+                n_window=n_window, n_outside_start=float(4 * D - mean_removed - n_window),
                 speed=float(np.mean([i["mean_speed"] for i in infos])),
                 t_reset=float(np.mean([i["t_reset"] for i in infos])))
 
@@ -229,10 +229,10 @@ def train(args, seeds, cache, log, shield_on=True, reward_kind="Rv", steps=None,
         if validation is not None:
             target = validation.next_due(agent.steps)
             if target is not None:
-                values = [run_episode(val_env, agent, rho=args.rho, shield_on=shield_on,
+                sample = [run_episode(val_env, agent, rho=args.rho, shield_on=shield_on,
                                       reward_kind=reward_kind, explore=False, seed=s,
-                                      episode=s)["dx"] for s in validation.scenario_ids]
-                row = validation.record(target, values)
+                                      episode=s) for s in validation.scenario_ids]
+                row = validation.record(target, sample)
                 log(f"  {tag} validation at {target}: Δx {row['delta_x_mean']:.3f} m "
                     f"(min {row['delta_x_min']:.3f}, max {row['delta_x_max']:.3f})")
         multi = bool((agent.buffer.n[:agent.buffer.size] > 1).any())
@@ -661,10 +661,10 @@ def report(args, R):
         rows.append([s["D"], s["n"], "/".join(str(x) for x in s["removed"]), f"{s['ok']} из {s['n']}",
                      " / ".join(str(s["unsafe_a"][r]) for r in RHOS),
                      " / ".join(str(s["unsafe_b"][r]) for r in RHOS), s["density"],
-                     s["n_window"], s["n_deficit"], s["speed"], s["t_reset"]])
+                     s["n_window"], s["n_outside_start"], s["speed"], s["t_reset"]])
     a(table(["D", "эпизодов", "удалено 0/1/2", "вставка при ρ = 1,0",
              "(а) ρ = " + "/".join(str(r) for r in RHOS), "(б) ρ = " + "/".join(str(r) for r in RHOS),
-             "плотность в окне на старте", "n_window на старте", "недостача на старте",
+             "плотность в окне на старте", "n_window на старте", "за окном на старте (n_outside)",
              "скорость в окне, м/с", "reset, с"], rows))
     T = R["train"]
     a("")
@@ -722,8 +722,9 @@ def report(args, R):
     a(f"Плотность окна [0; T_max] (п. 7.6): стартовая {fmt(tot['density_start'], 2)}, средняя "
       f"{fmt(tot['density_mean'], 2)}, минимальная {fmt(tot['density_min'], 2)} авт./км на полосу при "
       f"номинале D = {args.D}; машин за окном в среднем {fmt(tot['n_outside_mean'], 2)}, максимум "
-      f"{fmt(tot['n_outside_max'], 0)}; средняя недостача относительно 4D − removed — "
-      f"{fmt(tot['n_deficit_mean'], 2)} машин. Это прямое следствие отложенной рециркуляции: "
+      f"{fmt(tot['n_outside_max'], 0)}; средняя полная недостача относительно номинала 4D — "
+      f"{fmt(tot['n_deficit_mean'], 2)} машин (из них в среднем {fmt(tot['n_outside_mean'], 2)} — "
+      "за окном, остальное — removed). Это прямое следствие отложенной рециркуляции: "
       "n_window + n_outside = 4D − removed на каждом такте, но мгновенное n_window не обязано "
       "равняться 4D − removed.")
     a("")
@@ -797,13 +798,14 @@ def report(args, R):
     a("")
     a(table(["конфигурация", "фильтр", "награда", "эпизодов", "шагов", "E", "перехват",
              "TAKEOVER / ABORT / FALLBACK", "замена aπ", "R_int", "N_att", "N_att_rss", "N_blocked_rss",
-             "BLCR_rss", "N_exec", "столкновений", "CR", "из них удар сзади", "v_eff, м/с", "JerkRMS",
+             "BLCR_rss", "N_exec", "столкновений", "CR", "из них удар сзади", "v_eff, м/с",
+             "CompRate", "Ttravel_pen, с", "N_cutin", "JerkRMS",
              "Σ штрафа TTC", "Σ штрафа за столкновения"],
             [[m["arm"], m["filter"], m["reward"], m["episodes"], m["steps"], m["E"], m["intercept"],
               f"{m['takeover']} / {m['abort']} / {m['fallback']}", m["masked"], m["R_int"], m["N_att"],
               m["N_att_rss"], m["N_blocked_rss"], m["BLCR_rss"], m["N_exec"], m["crashes"], m["CR"],
-              m["crash_rear"], m["v_eff"], m["jerk_rms"],
-              m["ttc_pen"] if m["reward"] == "R_RS" else None,
+              m["crash_rear"], m["v_eff"], m["comp_rate"], m["t_travel_pen"], m["n_cutin"],
+              m["jerk_rms"], m["ttc_pen"] if m["reward"] == "R_RS" else None,
               m["col_pen"] if m["reward"] == "R_RS" else None] for m in R["arms"]]))
     a("")
     a("«Удар сзади» — описательный признак: ближайший другой столкнувшийся автомобиль с боковым "
@@ -1051,7 +1053,8 @@ def main(argv=None):
         write_csv(out / "val_history.csv", validation.history)
     else:
         (out / "val_history.csv").write_text(
-            "step,n,delta_x_mean,delta_x_min,delta_x_max\n", encoding="utf-8")
+            "step,n,delta_x_mean,delta_x_min,delta_x_max,n_att_mean,n_blocked_mean,"
+            "v_eff_mean,comp_rate\n", encoding="utf-8")
     (out / "s_conv.json").write_text(to_json(R["s_conv"]), encoding="utf-8")
     write_csv(out / "train_episodes.csv", episodes)
     tot = totals(episodes)
@@ -1169,7 +1172,8 @@ def main(argv=None):
                                         and R["saveload"]["dqt"] == 0.0
                                         and R["saveload"]["same_greedy"])},
         "baselines": {"status": _status(baseline_ok)},
-        "N_exec_other": {"status": _status(all(m["N_exec_other"] == 0 for m in R["arms"])
+        "N_exec_other": {"status": _status(R["train_total"]["N_exec_other"] == 0
+                                           and all(m["N_exec_other"] == 0 for m in R["arms"])
                                            and all(t["N_exec_other"] == 0 for t in R["seek_total"]))},
         "main_series": {"status": _status(main_series)},
         "abort_seeker": {"status": _status(R["seek_abort"] is not None,

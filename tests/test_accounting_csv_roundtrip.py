@@ -93,6 +93,13 @@ def test_bool_string_zero_is_false_and_invalid_flags_are_rejected():
         counters_from_journal([_row(policy_step="2")])
 
 
+def test_step_flag_and_command_must_agree():
+    with pytest.raises(ValueError):
+        counters_from_journal([_row(policy_step=0, intervention=1, command="IDLE")])
+    with pytest.raises(ValueError):
+        counters_from_journal([_row(policy_step=1, intervention=0, command=ABORT)])
+
+
 def test_is_action_masked_requires_both_actions():
     assert is_action_masked(True, "LANE_LEFT", "IDLE")
     assert not is_action_masked(True, "LANE_LEFT", None)

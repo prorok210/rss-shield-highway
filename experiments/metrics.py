@@ -260,8 +260,9 @@ def compute_s_conv(steps: Sequence[int], delta_x_vals: Sequence[float], *, windo
 @dataclass
 class ValidationSchedule:
     """Fixed validation runs of the main training budget: 20 scenarios every 5000 decision steps,
-    epsilon = 0, recorded as (step, mean delta_x).  The pilot never reaches the first checkpoint and
-    writes status = insufficient_checkpoints."""
+    epsilon = 0.  Every checkpoint records delta_x and the a_pi/outcome aggregates of the run
+    (N_att, N_blocked, v_eff, completion); the pilot never reaches the first checkpoint and writes
+    status = insufficient_checkpoints."""
     every: int = VAL_EVERY
     scenario_ids: tuple[int, ...] = VAL_SCENARIOS
     history: list[dict[str, Any]] = field(default_factory=list)
@@ -273,13 +274,26 @@ class ValidationSchedule:
         target = (self.history[-1]["step"] if self.history else 0) + self.every
         return target if target <= step else None
 
-    def record(self, step: int, delta_x: Sequence[float]) -> dict[str, Any]:
-        values = np.asarray(delta_x, dtype=float)
+    def record(self, step: int, episodes: Sequence[Any]) -> dict[str, Any]:
+        """Record one checkpoint.  `episodes` is either a sequence of run_episode() dicts or a
+        sequence of delta_x numbers (the latter keeps the method usable in isolated tests)."""
+        if not episodes:
+            raise ValueError("validation sample must be non-empty")
+        if isinstance(episodes[0], dict):
+            values = np.asarray([float(e["dx"]) for e in episodes], dtype=float)
+            n_att = float(np.mean([e["N_att"] for e in episodes]))
+            n_blocked = float(np.mean([e["N_blocked"] for e in episodes]))
+            v_eff = float(np.mean([e["v_eff"] for e in episodes]))
+            comp_rate = float(np.mean([bool(e["completed"]) for e in episodes]))
+        else:
+            values = np.asarray(episodes, dtype=float)
+            n_att = n_blocked = v_eff = comp_rate = None
         if values.size == 0 or not np.all(np.isfinite(values)):
             raise ValueError("validation delta_x must be a non-empty finite sample")
         row = {"step": int(step), "n": int(values.size),
                "delta_x_mean": float(values.mean()), "delta_x_min": float(values.min()),
-               "delta_x_max": float(values.max())}
+               "delta_x_max": float(values.max()), "n_att_mean": n_att,
+               "n_blocked_mean": n_blocked, "v_eff_mean": v_eff, "comp_rate": comp_rate}
         self.history.append(row)
         return row
 

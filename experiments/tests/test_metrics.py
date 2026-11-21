@@ -135,6 +135,15 @@ def test_validation_schedule_checkpoints():
     assert s["status"] == "insufficient_checkpoints"
 
 
+def test_validation_history_keeps_ap_and_outcome_aggregates():
+    v = ValidationSchedule()
+    row = v.record(5000, [dict(dx=1.0, N_att=2, N_blocked=1, v_eff=10.0, completed=True),
+                          dict(dx=3.0, N_att=4, N_blocked=2, v_eff=14.0, completed=False)])
+    assert row["delta_x_mean"] == 2.0
+    assert row["n_att_mean"] == 3.0 and row["n_blocked_mean"] == 1.5
+    assert row["v_eff_mean"] == 12.0 and row["comp_rate"] == 0.5
+
+
 # ---------------------------------------------------------------- pilot acceptance
 def _checks(**statuses):
     return {k: {"status": v} for k, v in statuses.items()}

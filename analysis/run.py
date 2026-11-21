@@ -157,14 +157,18 @@ def main(argv=None):
                 L, pv, how = P.page_test(tab)
                 R["page"][f"{outcome} over {over}"] = dict(levels=levels, blocks=len(tab), L=L, p=pv, method=how)
 
-    L = ["# Statistical plan on pilot data (protocol 7.9)", "",
+    title = ("# Statistical plan (protocol 7.9)" if args.design == "main"
+             else "# Statistical plan on pilot data (protocol 7.9)")
+    intro = (f"Input: `{args.episodes}`, {len(rows)} episodes. Parametric bootstrap: {args.boot} "
+             f"replicates; two-way cluster bootstrap: {args.boot_sens}; H1 difference: {args.boot_diff}.")
+    if args.design != "main":
+        intro += (" Pilot policies are not trained: the numbers show that every step of the plan is "
+                  "computed, not that H1-H3 hold.")
+    L = [title, "",
          f"Design mode: **{args.design}**"
          + ("" if args.design == "main" else
             " (diagnostic: the pre-registered design completeness is not enforced)") + ".", "",
-         f"Input: `{args.episodes}`, {len(rows)} episodes. Parametric bootstrap: {args.boot} replicates "
-         f"(the plan requires at least 1000 for the main series); two-way cluster bootstrap: {args.boot_sens}; "
-         f"H1 difference: {args.boot_diff}. Pilot policies are not trained: the numbers show that every step of "
-         "the plan is computed, not that H1-H3 hold.", "",
+         intro, "",
          "## H1: checks on episodes with a correct start", "",
          "Start rule and classification rho: `experiments/h1.py` (correct start at rho = 1.0 s for every arm; "
          "Baseline 2 classified at the reference rho = 1.0 s). `rho_cls` is the rho used for the categories.", "",
@@ -189,18 +193,22 @@ def main(argv=None):
          "parametric bootstrap of the signed likelihood root under the null model; Holm over the seven checks in "
          "each analysis; sensitivity: two-way cluster bootstrap that keeps shared scenario ids.", "",
          table(["check", "function", "model", "estimate", "SE", "signed root", "p (bootstrap)",
-                "B / B_conv", "p Holm", "converged (via)", "sens. estimate", "sens. 95 % interval",
+                "B / B_conv", "stationary share", "p Holm", "converged (via)", "sens. estimate", "sens. 95 % interval",
                 "sens. p", "sens. p Holm", "outcome"],
                [[r["check"], f"`{r['function']}`", r["model"], r["primary"]["estimate"], r["primary"]["se"],
                  r["primary"]["root"], r["primary"]["p_boot"],
-                 f"{r['primary'].get('B')} / {r['primary'].get('B_conv')}", r["p_holm_primary"],
+                 f"{r['primary'].get('B')} / {r['primary'].get('B_conv')}",
+                 fmt(r["primary"].get("stationary_share"), 3), r["p_holm_primary"],
                  ("yes" if r["primary"]["converged"] else "no: " + r["primary"]["message"])
                  + f" ({r['primary'].get('converged_via', '')})",
                  r["sensitivity"]["estimate"], f"[{fmt(r['sensitivity']['lower'])}; {fmt(r['sensitivity']['upper'])}]",
                  r["sensitivity"]["p"], r["p_holm_sensitivity"], r["outcome"]] for r in R["primary"]]), "",
          f"Control (outside the family) `{P.CONTROL.function.__name__}`, M5: estimate {fmt(R['control']['estimate'])}, "
-         f"SE {fmt(R['control']['se'])}, one-sided bootstrap p {fmt(R['control']['p_boot'])}, converged: "
-         f"{R['control']['converged']}{'' if R['control']['converged'] else ' (' + R['control']['message'] + ')'}.", "",
+         f"SE {fmt(R['control']['se'])}, one-sided bootstrap p {fmt(R['control']['p_boot'])}, "
+         f"B/B_conv {R['control'].get('B')}/{R['control'].get('B_conv')}, "
+         f"converged: {R['control']['converged']} ({R['control'].get('converged_via', '')}), "
+         f"stationary share {fmt(R['control'].get('stationary_share'), 3)}"
+         f"{'' if R['control']['converged'] else ' (' + R['control']['message'] + ')'}.", "",
          f"Excluded episodes: E = 0: {R['excluded']['E0']}; N_att = 0 (only from M4): {R['excluded']['N_att0']} of "
          f"{R['excluded']['episodes']}.", "",
          "Pearson dispersion without random effect and overdispersion (Poisson / binomial): "

@@ -442,6 +442,7 @@ def bootstrap_signed_root(model, name, direction, n_boot, rng, max_failed=0.1):
     out = dict(name=name, direction=direction, estimate=None, se=None, root=None, p_boot=None,
                p_wald=None, n_boot=n_boot, n_failed=0, B=n_boot, B_conv=0, fail_frac=None,
                model_failed=False, converged=False, message="", converged_via=full.converged_via,
+               n_stationary_boot=0, stationary_share=None,
                sigma_u=full.sigma_u, scale=full.scale, loglik=full.loglik)
     if not (full.converged and null.converged):
         out["model_failed"] = True
@@ -453,14 +454,18 @@ def bootstrap_signed_root(model, name, direction, n_boot, rng, max_failed=0.1):
     r = signed_root(full, null, name)
     out.update(estimate=est, se=se, root=r,
                p_wald=float(special.ndtr(-direction * est / se)) if se > 0 else None)
-    stats = []
+    stats, n_stationary = [], 0
     for _ in range(n_boot):
         m = model.with_y(null_model.simulate(null, rng))
         f1, f0 = m.fit(), m.drop(name).fit()
         if f1.converged and f0.converged:
             stats.append(signed_root(f1, f0, name))
+            if "stationary_gradient" in (f1.converged_via, f0.converged_via):
+                n_stationary += 1
         else:
             out["n_failed"] += 1
+    out["n_stationary_boot"] = n_stationary
+    out["stationary_share"] = (n_stationary / len(stats)) if stats else None
     bt = bootstrap_lr_pvalue(r, stats, n_boot, direction=direction, max_fail_frac=max_failed)
     out.update(B=bt["B"], B_conv=bt["B_conv"], fail_frac=bt["fail_frac"],
                model_failed=bt["model_failed"])

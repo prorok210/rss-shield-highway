@@ -65,6 +65,10 @@ def validate_design_completeness(rows, spec=DesignSpec()):
     The rho of Baseline 2 is ignored (one classification at rho_ref = 1.0 s)."""
     by_cell = {}
     valid_start = {}
+    unexpected = sorted({int(float(r["D"])) for r in rows} - set(spec.densities))
+    if unexpected:
+        raise DesignCompletenessError(
+            f"unexpected density D outside the design: {unexpected}")
 
     for r in rows:
         mode = str(r["mode"]).strip()

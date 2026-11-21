@@ -181,101 +181,109 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
                            [_snap(v) for v in env.road.vehicles if v is not ego],
                            return_active=bool(ego.return_active))
 
+    cutin.update_frame(0, _snap(ego),
+                       [_snap(v) for v in env.road.vehicles if v is not ego],
+                       return_active=bool(ego.return_active))
     env.road.step = _metrics_hook
     frames = h1.FrameRecorder(env) if classify else None
     in_fifo = {}                    # FIFO exit frame -> (decision step, policy step) of the command
     open_lc = []                    # lane changes started, not crossed yet: (step or None, direction)
     del ego.acc_log[:]
     k, term, trunc = 0, False, False
-    while not (term or trunc):
-        t0 = time.perf_counter()
-        q = np.asarray(agent.q_values(obs), dtype=float)
-        a_pi = NAMES[int(np.argmax(q))]
-        pref = agent.rng.random(len(NAMES)) if explore and agent.rng.random() < agent.epsilon() else q
-        a_pref = NAMES[int(np.argmax(pref))]
-        t1 = time.perf_counter()
-        if shield is not None:
-            dec = shield.decide(a_pref, {n: float(pref[i]) for i, n in enumerate(NAMES)})
-            cmd, mask, reason = dec.command, np.asarray(dec.mask, bool), dec.reason
-        else:
-            cmd, mask, reason = a_pref, np.ones(len(NAMES), bool), "no_filter"
-        t2 = time.perf_counter()
-        why = dec.violations.get(a_pi) if shield is not None else None
-        policy = count_step(c, a_pi, cmd, mask, why) == POLICY
-        if policy and asm is not None:
-            asm.policy_step(obs, mask, ACTION_INDEX[cmd], meta=(episode, k))
-        queued = queued_command(ego)
-        in_fifo[ego.frame + ego.k_tau] = (k, policy)
-        target_prev = ego.target_lane_index[2]
-        if frames is not None:
-            frames.decision(cmd)
-        obs2, _, term, trunc, _ = env.step(cmd)
-        if density is not None:
-            density.record(len(env._window(float(ego.position[0]), exclude=ego)))
-        t3 = time.perf_counter()
-        r, parts = step_reward(reward_kind, ego, env.road)
-        c["ret"] += r
-        c["ttc_events"] += int(parts.get("ttc_pen", 0.0) > 0)
-        c["ttc_pen"] += float(parts.get("ttc_pen", 0.0))
-        c["col_pen"] += float(parts.get("col_pen", 0.0))
-        if asm is not None:
-            asm.reward(r)
-        # commands that left the FIFO during this step (K_TAU = FRAMES_PER_DECISION: the command of
-        # the previous decision step, on the first frame, i.e. before any crossing of this step)
-        left = [in_fifo.pop(f) for f in sorted(in_fifo) if f < ego.frame]
-        target_now = ego.target_lane_index[2]
-        if target_now != target_prev:
-            d, n = int(np.sign(target_now - lane_prev)), abs(target_now - lane_prev)
-            if open_lc and open_lc[-1][1] != d:
-                del open_lc[:]          # reversal before the crossing: cancelled, as by ABORT
-            del open_lc[n:]
-            if len(open_lc) < n:
-                src = left[-1] if left else (None, False)
-                open_lc.append((src[0] if src[1] else None, d))
-        lane_now = ego.lane_index[2]
-        crossed = lane_now != lane_prev
-        exec_from = ""
-        if crossed:
-            rec = (open_lc.pop(0) if open_lc and open_lc[0][1] == np.sign(lane_now - lane_prev)
-                   else None)
-            if rec is not None and rec[0] is not None:
-                exec_from = rec[0]
-                c["N_exec"] += 1
-                c["N_exec_int"] += int(ego.sup_active)
+    try:
+        while not (term or trunc):
+            t0 = time.perf_counter()
+            q = np.asarray(agent.q_values(obs), dtype=float)
+            a_pi = NAMES[int(np.argmax(q))]
+            pref = agent.rng.random(len(NAMES)) if explore and agent.rng.random() < agent.epsilon() else q
+            a_pref = NAMES[int(np.argmax(pref))]
+            t1 = time.perf_counter()
+            if shield is not None:
+                dec = shield.decide(a_pref, {n: float(pref[i]) for i, n in enumerate(NAMES)})
+                cmd, mask, reason = dec.command, np.asarray(dec.mask, bool), dec.reason
             else:
-                c["N_exec_other"] += 1
-        lane_prev = lane_now
-        if term and ego.crashed:
-            c["crashed"] = True
-            c["crash_intercept"] = not policy
-            c["crash_sup_active"] = bool(ego.sup_active)
-            c["crash_rear"] = rear_contact(ego, env.road)
-        row = dict(episode=episode, k=k, t=round(k * DT_DECISION, 1), a_pi=a_pi, command=cmd,
-                   policy_step=int(policy), intervention=int(not policy),
-                   sup_cmd="" if policy else cmd, reason=reason,
-                   mask=mask_str(mask), block_reason=block_reason(a_pi, mask, why) if policy else "",
-                   queued=queued or "", active_cmd=ego.active_cmd or "",
-                   active_sup=int(ego.sup_active), brake_mode=int(ego.brake_mode),
-                   return_active=int(ego.return_active), fallback=int(bool(ego.fallback)),
-                   abort_ignored=int(ego.abort_ignored), lane=int(lane_now),
-                   target_lane=int(ego.target_lane_index[2]), crossed=int(crossed),
-                   exec_from=exec_from,
-                   x=round(float(ego.position[0]), 3), v=round(float(ego.speed), 3), r=r,
-                   crashed=int(ego.crashed))
-        if steps_log is not None:
-            steps_log.append(row)
-        if journal is not None:
-            journal.append(row)
-        t4 = time.perf_counter()
-        if train:
-            agent.on_env_step()
-        t5 = time.perf_counter()
-        c["t_policy"] += t1 - t0
-        c["t_shield"] += t2 - t1
-        c["t_env"] += t3 - t2
-        c["t_learn"] += t5 - t4
-        k += 1
-        obs = obs2
+                cmd, mask, reason = a_pref, np.ones(len(NAMES), bool), "no_filter"
+            t2 = time.perf_counter()
+            why = dec.violations.get(a_pi) if shield is not None else None
+            policy = count_step(c, a_pi, cmd, mask, why) == POLICY
+            if policy and asm is not None:
+                asm.policy_step(obs, mask, ACTION_INDEX[cmd], meta=(episode, k))
+            queued = queued_command(ego)
+            in_fifo[ego.frame + ego.k_tau] = (k, policy)
+            target_prev = ego.target_lane_index[2]
+            if frames is not None:
+                frames.decision(cmd)
+            obs2, _, term, trunc, _ = env.step(cmd)
+            if density is not None:
+                density.record(len(env._window(float(ego.position[0]), exclude=ego)))
+            t3 = time.perf_counter()
+            r, parts = step_reward(reward_kind, ego, env.road)
+            c["ret"] += r
+            c["ttc_events"] += int(parts.get("ttc_pen", 0.0) > 0)
+            c["ttc_pen"] += float(parts.get("ttc_pen", 0.0))
+            c["col_pen"] += float(parts.get("col_pen", 0.0))
+            if asm is not None:
+                asm.reward(r)
+            # commands that left the FIFO during this step (K_TAU = FRAMES_PER_DECISION: the command of
+            # the previous decision step, on the first frame, i.e. before any crossing of this step)
+            left = [in_fifo.pop(f) for f in sorted(in_fifo) if f < ego.frame]
+            target_now = ego.target_lane_index[2]
+            if target_now != target_prev:
+                d, n = int(np.sign(target_now - lane_prev)), abs(target_now - lane_prev)
+                if open_lc and open_lc[-1][1] != d:
+                    del open_lc[:]          # reversal before the crossing: cancelled, as by ABORT
+                del open_lc[n:]
+                if len(open_lc) < n:
+                    src = left[-1] if left else (None, False)
+                    open_lc.append((src[0] if src[1] else None, d))
+            lane_now = ego.lane_index[2]
+            crossed = lane_now != lane_prev
+            exec_from = ""
+            if crossed:
+                rec = (open_lc.pop(0) if open_lc and open_lc[0][1] == np.sign(lane_now - lane_prev)
+                       else None)
+                if rec is not None and rec[0] is not None:
+                    exec_from = rec[0]
+                    c["N_exec"] += 1
+                    c["N_exec_int"] += int(ego.sup_active)
+                else:
+                    c["N_exec_other"] += 1
+            lane_prev = lane_now
+            if term and ego.crashed:
+                c["crashed"] = True
+                c["crash_intercept"] = not policy
+                c["crash_sup_active"] = bool(ego.sup_active)
+                c["crash_rear"] = rear_contact(ego, env.road)
+            row = dict(episode=episode, k=k, t=round(k * DT_DECISION, 1), a_pi=a_pi, command=cmd,
+                       policy_step=int(policy), intervention=int(not policy),
+                       sup_cmd="" if policy else cmd, reason=reason,
+                       mask=mask_str(mask), block_reason=block_reason(a_pi, mask, why) if policy else "",
+                       queued=queued or "", active_cmd=ego.active_cmd or "",
+                       active_sup=int(ego.sup_active), brake_mode=int(ego.brake_mode),
+                       return_active=int(ego.return_active), fallback=int(bool(ego.fallback)),
+                       abort_ignored=int(ego.abort_ignored), lane=int(lane_now),
+                       target_lane=int(ego.target_lane_index[2]), crossed=int(crossed),
+                       exec_from=exec_from,
+                       x=round(float(ego.position[0]), 3), v=round(float(ego.speed), 3), r=r,
+                       crashed=int(ego.crashed))
+            if steps_log is not None:
+                steps_log.append(row)
+            if journal is not None:
+                journal.append(row)
+            t4 = time.perf_counter()
+            if train:
+                agent.on_env_step()
+            t5 = time.perf_counter()
+            c["t_policy"] += t1 - t0
+            c["t_shield"] += t2 - t1
+            c["t_env"] += t3 - t2
+            c["t_learn"] += t5 - t4
+            k += 1
+            obs = obs2
+    finally:
+        if frames is not None:
+            frames.close()
+        env.road.step = road_step
     if asm is not None:
         mask_T = None
         if not term:
@@ -294,9 +302,6 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
     else:
         c["jerk_jump_share"], c["jerk_rms_smooth"] = 0.0, 0.0
     c["frames"] = int(a.size)
-    if frames is not None:
-        frames.close()
-    env.road.step = road_step
     if route is not None:
         c.update(route.summary(c["crashed"], float(ego.position[0])))
     else:

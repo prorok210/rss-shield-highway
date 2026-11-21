@@ -11,6 +11,6 @@
 | pygame / pygame-ce | не установлен / 2.5.8 |
 | torch (для DQN) | не установлен |
 | stable-baselines3 (если используется) | не установлен |
-| git commit | 9131fec |
-| sha256 (rss_shield/*.py) | 86d34ffda08d8f01 |
-| sha256 (tests/*.py) | 864ba62751b3f9a1 |
+| git commit | 5649827 |
+| sha256 (rss_shield/*.py) | 63b6f688bbe2305e |
+| sha256 (tests/*.py) | 6473e005bc7c1069 |
