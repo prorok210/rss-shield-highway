@@ -42,10 +42,10 @@ explicit failure: its p-value enters Holm as 1, the family stays K = 7, the chec
 established (model failure)" - there is no fallback model.
 """
 from dataclasses import dataclass
-from itertools import permutations, product
+from itertools import permutations
 
 import numpy as np
-from scipy import special
+from scipy import special, stats
 
 from analysis.models import LMM, BetaBinGLMM, NB2GLMM, bootstrap_signed_root
 
@@ -353,22 +353,69 @@ def adjacent_contrasts(means):
     return out
 
 
+def page_trend_test_exact_ties(matrix, *, decreasing=True, max_exact_k=7):
+    """Page's trend test with midranks and an exact conditional permutation null that preserves
+    the within-block tie structure.  Equal values must not receive distinct ranks (the old
+    double argsort did exactly that and produced a spurious trend); the distribution is built by
+    discrete convolution of the doubled integer midranks over blocks, so ties are kept exactly.
+    For k > max_exact_k the asymptotic tie-adjusted normal approximation is used.  A constant
+    matrix has Var_0(L) = 0 and p = 1.0."""
+    X = np.asarray(matrix, dtype=float)
+    if X.ndim != 2:
+        raise ValueError("input matrix must be 2D: (m blocks x k ordered treatments)")
+    m, k = X.shape
+    if m < 1 or k < 2:
+        raise ValueError("need at least 1 block and 2 treatment levels")
+    if not np.all(np.isfinite(X)):
+        raise ValueError("input matrix contains NaN or infinite values")
+
+    weights = np.arange(k, 0, -1, dtype=int) if decreasing else np.arange(1, k + 1, dtype=int)
+    ranks = np.apply_along_axis(lambda row: stats.rankdata(row, method="average"), 1, X)
+    r2 = np.rint(2.0 * ranks).astype(int)          # exact integer doubled midranks
+    L_obs_2 = int(np.sum(r2 * weights[None, :]))
+    L_obs = L_obs_2 / 2.0
+
+    mean_L = float(m * k * (k + 1) ** 2 / 4.0)
+    w_ss = float(np.sum((weights - weights.mean()) ** 2))
+    var_L = float(sum(w_ss * np.sum((ranks[i] - ranks[i].mean()) ** 2) / (k - 1)
+                      for i in range(m)))
+    has_ties = any(len(np.unique(X[i])) < k for i in range(m))
+
+    if k <= max_exact_k:
+        perms = list(permutations(range(k)))
+        n_perm = len(perms)
+        dist = {0: 1}
+        total = 1
+        for i in range(m):
+            row_r2 = r2[i]
+            row_counts = {}
+            for p in perms:
+                v = sum(int(row_r2[p[j]]) * int(weights[j]) for j in range(k))
+                row_counts[v] = row_counts.get(v, 0) + 1
+            new_dist = {}
+            for s0, c0 in dist.items():
+                for v1, c1 in row_counts.items():
+                    new_dist[s0 + v1] = new_dist.get(s0 + v1, 0) + c0 * c1
+            dist = new_dist
+            total *= n_perm
+        ge_count = sum(c for s, c in dist.items() if s >= L_obs_2)
+        p_val = float(ge_count / total)
+        method = "exact_conditional_ties"
+    else:
+        p_val = 1.0 if var_L <= 0.0 else float(stats.norm.sf((L_obs - mean_L) / np.sqrt(var_L)))
+        method = "asymptotic_tie_adjusted"
+
+    z_stat = 0.0 if var_L <= 0.0 else float((L_obs - mean_L) / np.sqrt(var_L))
+    return {"L": L_obs, "mean_L": mean_L, "var_L": var_L, "z": z_stat,
+            "p_value": p_val, "has_ties": has_ties, "method": method}
+
+
 def page_test(table):
-    """Page's trend test for a decreasing response over ordered treatments (columns) in blocks
-    (rows). L = sum_j j * (rank sum of column j) with ranks of the negated values; the p-value is
-    exact (all rank assignments) when there are at most 50 000 of them, else normal."""
-    t = -np.asarray(table, float)
-    n, k = t.shape
-    ranks = np.argsort(np.argsort(t, axis=1), axis=1) + 1.0
-    L = float((ranks.sum(axis=0) * np.arange(1, k + 1)).sum())
-    perms = list(permutations(range(1, k + 1)))
-    if len(perms) ** n <= 50_000:
-        per_block = [sum(j * p[j - 1] for j in range(1, k + 1)) for p in perms]
-        dist = np.array([sum(c) for c in product(per_block, repeat=n)], float)
-        return L, float(np.mean(dist >= L - 1e-9)), "exact"
-    mean = n * k * (k + 1) ** 2 / 4.0
-    var = n * k ** 2 * (k + 1) * (k ** 2 - 1) / 144.0
-    return L, float(special.ndtr(-(L - mean) / np.sqrt(var))), "normal"
+    """Page's test for a decreasing response over ordered treatments (columns) in blocks (rows).
+    Kept as the (L, p, method) tuple used by analysis.run; the implementation is the tie-exact
+    conditional test above."""
+    r = page_trend_test_exact_ties(table, decreasing=True)
+    return r["L"], r["p_value"], r["method"]
 
 
 def trend_table(rows, outcome, over, modes="B"):

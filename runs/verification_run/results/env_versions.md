@@ -2,15 +2,15 @@
 
 | Компонент | Версия |
 |---|---|
-| Python | 3.12.3 |
-| ОС | Linux-4.19.0-gvisor-x86_64-with-glibc2.39 |
+| Python | 3.14.7 |
+| ОС | macOS-26.5.2-arm64-arm-64bit-Mach-O |
 | highway-env | 1.12.1 |
 | gymnasium | 1.4.0 |
-| numpy | 2.5.4 |
+| numpy | 2.5.5 |
 | pytest | 9.2.0 |
 | pygame / pygame-ce | не установлен / 2.5.8 |
 | torch (для DQN) | не установлен |
 | stable-baselines3 (если используется) | не установлен |
-| git commit | 317329c |
-| sha256 (rss_shield/*.py) | 6dd2d8565462521d |
-| sha256 (tests/*.py) | 5f99db865b9847ec |
+| git commit | 9131fec |
+| sha256 (rss_shield/*.py) | 86d34ffda08d8f01 |
+| sha256 (tests/*.py) | 864ba62751b3f9a1 |

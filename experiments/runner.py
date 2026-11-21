@@ -61,6 +61,8 @@ from rss_shield.params import ACTION_INDEX, ACTIONS, DT, DT_DECISION, LENGTH, WI
 from rss_shield.shield import MAIN_SERIES, RSSShield, ShieldConfig, describe, is_main_series
 from experiments import h1
 from experiments.generator import queued_command
+from experiments.metrics import (CutInTracker, DensityTracker, RouteProgressTracker, VehSnap,
+                                 target_distance_L)
 from experiments.rewards import step_reward
 
 JERK_JUMP = 50.0      # m/s^3: a frame with |da|/dt above this is counted as a jump (diagnostics)
@@ -148,6 +150,38 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
              crash_intercept=False, crash_sup_active=False, crash_rear=False,
              t_policy=0.0, t_shield=0.0, t_env=0.0, t_learn=0.0)
     x0, lane_prev = float(ego.position[0]), ego.lane_index[2]
+    D = float(env.config.get("D", 0)) if hasattr(env, "config") else 0.0
+    duration = float(env.config.get("duration", 40.0)) if hasattr(env, "config") else 40.0
+    info_start = getattr(env, "start_info", None) or {}
+    density = None
+    if D > 0 and hasattr(env, "_window"):
+        try:
+            density = DensityTracker(int(D), int(info_start.get("removed", 0)),
+                                     int(env.config["lanes_count"]), 1.0)
+            density.record(len(env._window(float(ego.position[0]), exclude=ego)), is_start=True)
+        except (KeyError, AttributeError, ValueError):
+            density = None
+    route = RouteProgressTracker(x0, target_distance_L(D, duration), duration) if D > 0 else None
+    cutin = CutInTracker(rho_eval=rho if shield_on else h1.RHO_REF)
+    frame_no = 0
+    road_step = env.road.step
+
+    def _snap(v):
+        return VehSnap(vid=id(v), lane=int(v.lane_index[2]), target_lane=int(v.target_lane_index[2]),
+                       x=float(v.position[0]), y=float(v.position[1]), vx=float(v.speed),
+                       vy=float(v.speed * np.sin(v.heading)))
+
+    def _metrics_hook(dt):
+        nonlocal frame_no
+        road_step(dt)
+        frame_no += 1
+        if route is not None:
+            route.update_frame(frame_no * DT, float(ego.position[0]), bool(ego.crashed))
+        cutin.update_frame(frame_no, _snap(ego),
+                           [_snap(v) for v in env.road.vehicles if v is not ego],
+                           return_active=bool(ego.return_active))
+
+    env.road.step = _metrics_hook
     frames = h1.FrameRecorder(env) if classify else None
     in_fifo = {}                    # FIFO exit frame -> (decision step, policy step) of the command
     open_lc = []                    # lane changes started, not crossed yet: (step or None, direction)
@@ -176,6 +210,8 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
         if frames is not None:
             frames.decision(cmd)
         obs2, _, term, trunc, _ = env.step(cmd)
+        if density is not None:
+            density.record(len(env._window(float(ego.position[0]), exclude=ego)))
         t3 = time.perf_counter()
         r, parts = step_reward(reward_kind, ego, env.road)
         c["ret"] += r
@@ -258,14 +294,29 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
     else:
         c["jerk_jump_share"], c["jerk_rms_smooth"] = 0.0, 0.0
     c["frames"] = int(a.size)
-    c["dx"] = float(ego.position[0] - x0)
-    c["v_eff"] = c["dx"] / float(env.config["duration"])
+    if frames is not None:
+        frames.close()
+    env.road.step = road_step
+    if route is not None:
+        c.update(route.summary(c["crashed"], float(ego.position[0])))
+    else:
+        c.update(dict(L_target=None, delta_x=float(ego.position[0] - x0),
+                      v_eff=float((ego.position[0] - x0) / duration), survived=not c["crashed"],
+                      reached_L=None, completed=bool(trunc and not term), t_reach_L=None,
+                      t_travel_pen=duration))
+    if density is not None:
+        c.update(density.summary())
+    else:
+        c.update(dict(D_nominal=None, n_removed=None, n_window_start=None, n_outside_start=None,
+                      density_start=None, density_mean=None, density_min=None,
+                      n_outside_mean=None, n_outside_max=None, n_deficit_mean=None))
+    c.update(cutin.summary())
+    c["dx"] = float(c["delta_x"])
     c["BLCR"] = c["N_blocked"] / c["N_att"] if c["N_att"] else None
     c["N_att_rss"] = c["N_att"] - c["N_busy"] - c["N_no_lane"]
     c["N_blocked_rss"] = c["N_blocked"] - c["N_busy"] - c["N_no_lane"]
     c["BLCR_rss"] = c["N_blocked_rss"] / c["N_att_rss"] if c["N_att_rss"] else None
     c["R_int"] = (c["masked"] + c["intercept"]) / c["steps"] if c["steps"] else 0.0
-    c["completed"] = bool(trunc and not term)
     c["abort_ignored"] = int(ego.abort_ignored)
     info = getattr(env, "start_info", None) or {}
     c["removed"], c["insert_ok"] = info.get("removed"), info.get("insert_ok")
@@ -276,11 +327,9 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
     c["rho_cls"] = h1.classification_rho(shield is not None, rho)
     c["correct_start"] = h1.correct_start(info) if "unsafe_lane" in info else None
     c["crash_category"] = None
-    if frames is not None:
-        frames.close()
-        if c["crashed"]:
-            trace = frames.trace()
-            c["crash_category"] = h1.CR_UNC if trace is None else h1.classify_collision(trace, c["rho_cls"])
+    if frames is not None and c["crashed"]:
+        trace = frames.trace()
+        c["crash_category"] = h1.CR_UNC if trace is None else h1.classify_collision(trace, c["rho_cls"])
     c["h1_event"] = (h1.is_h1_event(c["correct_start"], c["crashed"], c["crash_category"])
                      if classify else None)
     # filter configuration of the episode: main_series is None without the filter

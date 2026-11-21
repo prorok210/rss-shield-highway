@@ -152,17 +152,17 @@ def test_sensitivity_resampling_keeps_shared_scenario_ids():
 
 def test_plan_runs_end_to_end_and_reports_every_check(tmp_path, capsys):
     rows = episodes(seed=6)
-    for i, r in enumerate(r for r in rows if r["mode"] == "A" and r["D"] == 10):
-        if i < 6:
-            r.update(mode="B2", rho="", unit=f"B2:10:{i % 2}", crashed=1, h1_event=int(i % 3 == 0),
-                     crash_category="CR_ego_op (reaction)" if i % 3 == 0 else "CR_env_op (rear-end)", rho_cls=1.0)
+    # two Baseline 2 units must see the same episode_seed set (paired H1 difference)
+    for i, r in enumerate([x for x in rows if x["mode"] == "A" and x["D"] == 10][:12]):
+        r.update(mode="B2", rho="", unit=f"B2:10:{i // 6}", crashed=1, h1_event=int(i % 3 == 0),
+                 crash_category="CR_ego_op (reaction)" if i % 3 == 0 else "CR_env_op (rear-end)", rho_cls=1.0)
     path = tmp_path / "episodes.csv"
     with open(path, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
         w.writeheader()
         w.writerows(rows)
     assert R.main(["--episodes", str(path), "--out", str(tmp_path), "--boot", "39", "--boot-sens", "99",
-                   "--boot-diff", "200"]) == 0
+                   "--boot-diff", "200", "--design", "pilot"]) == 0
     text = capsys.readouterr().out
     for c in P.PRIMARY:
         assert f"`{c.function.__name__}`" in text and c.key in text
@@ -184,8 +184,11 @@ def test_plan_runs_end_to_end_and_reports_every_check(tmp_path, capsys):
 
 def test_page_test_and_contrasts():
     L, p, how = P.page_test([[3, 2, 1], [9, 5, 4], [7, 6, 2]])           # decreasing in every block
-    assert how == "exact" and p == pytest.approx((1 / 6) ** 3) and L == 3 * (1 * 1 + 2 * 2 + 3 * 3)
+    assert how == "exact_conditional_ties" and p == pytest.approx((1 / 6) ** 3)
+    assert L == 3 * (1 * 1 + 2 * 2 + 3 * 3)
     assert P.page_test([[1, 2, 3], [4, 5, 9]])[1] == pytest.approx(1.0)
+    const = P.page_trend_test_exact_ties([[0.0, 0.0, 0.0]] * 5)
+    assert const["p_value"] == 1.0 and const["var_L"] == 0.0 and const["has_ties"]
     means = {(d, r): 20 - 0.1 * d - 5 * r - 0.1 * d * r for d in (10.0, 25.0, 40.0) for r in (0.4, 0.6, 1.0)}
     assert P.contrast_of_differences(means) == pytest.approx(-0.1 * 30 * 0.6)
     adj = P.adjacent_contrasts(means)

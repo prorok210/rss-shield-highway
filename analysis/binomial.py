@@ -71,23 +71,68 @@ def independent_product(powers):
     return float(np.prod(np.asarray(powers, float)))
 
 
-def cluster_bootstrap_difference(a, b, n_boot, rng, level=0.95):
-    """Difference of event shares mean(a) - mean(b) between two groups of policies with a
-    two-level cluster bootstrap: policies are resampled with replacement inside each group, then
-    episodes inside each drawn policy. a, b: lists of 0/1 arrays, one per policy.
-    Returns (difference, lower, upper) with a percentile interval."""
-    def share(group):
-        return float(np.mean([np.mean(x) for x in group]))
+def bootstrap_h1_diff_twoway(prop_events_by_unit, b2_events_by_unit, *, n_boot=10_000,
+                             seed=42, level=0.95):
+    """Two-way cluster bootstrap of CR_ego_op(Proposed) - CR_ego_op(Baseline 2).
 
-    def draw(group):
-        out = []
-        for i in rng.integers(0, len(group), len(group)):
-            x = group[i]
-            out.append(np.mean(x[rng.integers(0, len(x), len(x))]))
-        return float(np.mean(out))
+    The two arms share the episode_seed of every scenario, so resampling episodes independently
+    inside each arm destroys the pairing and produces a non-zero interval even when both arms
+    have identical event vectors.  Here the trained units are resampled independently inside each
+    arm, while the common correct-start scenarios are resampled with one integer multiplicity
+    vector shared by both arms.  Scenario ids are kept, and the sums are accumulated in int64, so
+    identical vectors give exactly diff = 0 and CI = [0, 0].  Extra Baseline 2 scenarios (used only
+    for H1b power) are excluded from the paired difference and counted explicitly."""
+    p_units = sorted(prop_events_by_unit)
+    b_units = sorted(b2_events_by_unit)
+    if not p_units or not b_units:
+        raise ValueError("both arms must have at least one trained unit")
 
-    a = [np.asarray(x, float) for x in a]
-    b = [np.asarray(x, float) for x in b]
-    diffs = np.array([draw(a) - draw(b) for _ in range(n_boot)])
-    lo, hi = np.quantile(diffs, [(1 - level) / 2, 1 - (1 - level) / 2])
-    return share(a) - share(b), float(lo), float(hi)
+    p_sets = [set(prop_events_by_unit[u]) for u in p_units]
+    b_sets = [set(b2_events_by_unit[v]) for v in b_units]
+    if any(s != p_sets[0] for s in p_sets[1:]):
+        raise ValueError("inconsistent valid scenario ids across Proposed units")
+    if any(s != b_sets[0] for s in b_sets[1:]):
+        raise ValueError("inconsistent valid scenario ids across Baseline 2 units")
+
+    s_prop, s_b2 = p_sets[0], b_sets[0]
+    s_common = sorted(s_prop & s_b2)
+    if not s_common:
+        raise ValueError("no common valid scenarios between Proposed and Baseline 2")
+
+    Yp = np.array([[int(prop_events_by_unit[u][s]) for s in s_common] for u in p_units],
+                  dtype=np.int64)
+    Yb = np.array([[int(b2_events_by_unit[v][s]) for s in s_common] for v in b_units],
+                  dtype=np.int64)
+    Mp, ns = Yp.shape
+    Mb = Yb.shape[0]
+    denom_p, denom_b = float(Mp * ns), float(Mb * ns)
+    diff_hat = float(Yp.sum() / denom_p - Yb.sum() / denom_b)
+
+    rng = np.random.default_rng(seed)
+    diffs = np.empty(n_boot, dtype=np.float64)
+    chunk = 1000
+    for start in range(0, n_boot, chunk):
+        end = min(start + chunk, n_boot)
+        nb = end - start
+
+        idx_s = rng.integers(0, ns, size=(nb, ns))
+        m_s = np.zeros((nb, ns), dtype=np.int64)
+        np.add.at(m_s, (np.repeat(np.arange(nb), ns), idx_s.ravel()), 1)
+
+        idx_p = rng.integers(0, Mp, size=(nb, Mp))
+        w_p = np.zeros((nb, Mp), dtype=np.int64)
+        np.add.at(w_p, (np.repeat(np.arange(nb), Mp), idx_p.ravel()), 1)
+
+        idx_b = rng.integers(0, Mb, size=(nb, Mb))
+        w_b = np.zeros((nb, Mb), dtype=np.int64)
+        np.add.at(w_b, (np.repeat(np.arange(nb), Mb), idx_b.ravel()), 1)
+
+        num_p = np.sum(w_p * (Yp @ m_s.T).T, axis=1)
+        num_b = np.sum(w_b * (Yb @ m_s.T).T, axis=1)
+        diffs[start:end] = num_p / denom_p - num_b / denom_b
+
+    lo, hi = np.percentile(diffs, [100 * (1 - level) / 2, 100 * (1 + level) / 2])
+    return {"diff": diff_hat, "ci_low": float(lo), "ci_high": float(hi),
+            "n_common_scenarios": ns, "n_extra_b2_excluded": len(s_b2 - s_prop),
+            "n_extra_prop_excluded": len(s_prop - s_b2),
+            "n_units_proposed": Mp, "n_units_baseline2": Mb}

@@ -50,7 +50,7 @@ jobs:
         run: python -m pytest -q -p no:cacheprovider experiments/tests analysis/tests 2>&1 | tee runs/pilot_ci/tests.txt
 
       - name: Pilot
-        run: python -m experiments.pilot --out runs/pilot_ci 2>&1 | tee runs/pilot_ci/pilot_log.txt
+        run: python -m experiments.pilot --out runs/pilot_ci --mode strict 2>&1 | tee runs/pilot_ci/pilot_log.txt
 
       - name: Upload pilot outputs
         if: always()
