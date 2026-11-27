@@ -152,10 +152,18 @@ def test_sensitivity_resampling_keeps_shared_scenario_ids():
 
 def test_plan_runs_end_to_end_and_reports_every_check(tmp_path, capsys):
     rows = episodes(seed=6)
-    # two Baseline 2 units must see the same episode_seed set (paired H1 difference)
-    for i, r in enumerate([x for x in rows if x["mode"] == "A" and x["D"] == 10][:12]):
-        r.update(mode="B2", rho="", unit=f"B2:10:{i // 6}", crashed=1, h1_event=int(i % 3 == 0),
-                 crash_category="CR_ego_op (reaction)" if i % 3 == 0 else "CR_env_op (rear-end)", rho_cls=1.0)
+    # append two Baseline 2 units seeing the same episode_seed set (paired H1 difference)
+    # without mutating Mode A rows at D = 10
+    template = [x for x in rows if x["mode"] == "A" and x["D"] == 10 and x["rho"] == 0.4][:6]
+    for u in range(2):
+        for j, base in enumerate(template):
+            idx = u * 6 + j
+            r = dict(base)
+            r.update(mode="B2", rho="", unit=f"B2:10:{u}", unit_seed=u, crashed=1,
+                     h1_event=int(idx % 3 == 0),
+                     crash_category="CR_ego_op (reaction)" if idx % 3 == 0 else "CR_env_op (rear-end)",
+                     rho_cls=1.0)
+            rows.append(r)
     path = tmp_path / "episodes.csv"
     with open(path, "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]))
@@ -166,10 +174,11 @@ def test_plan_runs_end_to_end_and_reports_every_check(tmp_path, capsys):
     text = capsys.readouterr().out
     for c in P.PRIMARY:
         assert f"`{c.function.__name__}`" in text and c.key in text
-    for needle in ("H1a (IUT", "H1b (IUT", "Descriptive difference", "control_natt_mode", "Contrast of differences",
+    for needle in ("H1a (IUT", "H1b (IUT", "Descriptive difference", "Descriptive cell summary",
+                   "control_natt_mode", "Contrast of differences",
                    "Page's test", "Pearson dispersion", "p Holm", "sens. p Holm"):
         assert needle in text, needle
-    out = P.run_primary([r for r in rows if r["mode"] in "AB"], 39, 99, seed=20261110)
+    out = P.run_primary([r for r in rows if r["mode"] in ("A", "B")], 39, 99, seed=20261110)
     by = {r["function"]: r for r in out}
     for name in ("h2_veff_rho", "h2_veff_D", "h3b_pblock_mode"):
         assert by[name]["primary"]["estimate"] < 0 and by[name]["sensitivity"]["estimate"] < 0

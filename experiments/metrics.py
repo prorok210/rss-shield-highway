@@ -18,6 +18,11 @@ VAL_SCENARIOS = tuple(range(10_000, 10_020))   # fixed validation scenarios (pro
 VAL_EVERY = 5_000                              # decision steps between validation runs
 VAL_WINDOW = 4                                 # checks in the convergence window (4 x 5000 steps)
 MAX_SUFFICIENT_STEP = 85_000                   # S_conv <= 85 000 is a sufficient budget
+VAL_HISTORY_COLUMNS = (
+    "step", "nominal_step", "episode", "episode_step", "updates",
+    "n", "delta_x_mean", "delta_x_min", "delta_x_max",
+    "n_att_mean", "n_blocked_mean", "v_eff_mean", "comp_rate",
+)
 
 
 def idm_eq_speed(D: float) -> float:
@@ -227,19 +232,24 @@ def compute_s_conv(steps: Sequence[int], delta_x_vals: Sequence[float], *, windo
     """S_conv: first validation check whose value and the next `window - 1` checks are at least
     rel_threshold of their maximum (protocol 7.7).  Fewer than window checkpoints is explicitly
     insufficient, never a silent convergence."""
+    if window <= 0:
+        raise ValueError(f"window must be positive, got {window!r}")
+    if expected_interval is not None and expected_interval <= 0:
+        raise ValueError(f"expected_interval must be positive, got {expected_interval!r}")
     s_arr = np.asarray(steps, dtype=int)
     x_arr = np.asarray(delta_x_vals, dtype=float)
     if len(s_arr) != len(x_arr):
         raise ValueError("steps and delta_x_vals must have equal length")
+    if len(x_arr) and not np.all(np.isfinite(x_arr)):
+        raise ValueError("delta_x_vals contains non-finite values")
+    if len(s_arr) >= 2:
+        if np.any(np.diff(s_arr) <= 0):
+            raise ValueError("steps must be strictly increasing")
+        if expected_interval is not None and np.any(np.diff(s_arr) != expected_interval):
+            raise ValueError(f"steps must be spaced by {expected_interval}")
     if len(s_arr) < window:
         return {"s_conv": None, "budget_sufficient": False, "status": "insufficient_checkpoints",
                 "x_max": float(np.max(x_arr)) if len(x_arr) else None}
-    if np.any(np.diff(s_arr) <= 0):
-        raise ValueError("steps must be strictly increasing")
-    if expected_interval is not None and np.any(np.diff(s_arr) != expected_interval):
-        raise ValueError(f"steps must be spaced by {expected_interval}")
-    if not np.all(np.isfinite(x_arr)):
-        raise ValueError("delta_x_vals contains non-finite values")
     x_max = float(np.max(x_arr))
     if x_max <= 0.0:
         return {"s_conv": None, "budget_sufficient": False, "status": "non_positive_progress",
@@ -260,25 +270,66 @@ def compute_s_conv(steps: Sequence[int], delta_x_vals: Sequence[float], *, windo
 @dataclass
 class ValidationSchedule:
     """Fixed validation runs of the main training budget: 20 scenarios every 5000 decision steps,
-    epsilon = 0.  Every checkpoint records delta_x and the a_pi/outcome aggregates of the run
-    (N_att, N_blocked, v_eff, completion); the pilot never reaches the first checkpoint and writes
-    status = insufficient_checkpoints."""
+    epsilon = 0.  By default (`exact_step=True`), each checkpoint must be evaluated at the exact
+    nominal step mark (via the per-step callback of `runner.run_episode`), failing loudly on any
+    step mismatch.  Every checkpoint records actual and nominal step, training episode/step/updates
+    context, delta_x and the a_pi/outcome aggregates (N_att, N_blocked, v_eff, completion); the
+    short 3000-step pilot never reaches the first checkpoint and writes status =
+    insufficient_checkpoints."""
     every: int = VAL_EVERY
     scenario_ids: tuple[int, ...] = VAL_SCENARIOS
+    window: int = VAL_WINDOW
+    rel_threshold: float = 0.95
+    max_sufficient_step: int = MAX_SUFFICIENT_STEP
+    exact_step: bool = True
     history: list[dict[str, Any]] = field(default_factory=list)
 
-    def next_due(self, step: int) -> int | None:
-        """Scheduled checkpoint crossed by `step` (the first one when several were skipped)."""
-        if step < self.every:
-            return None
-        target = (self.history[-1]["step"] if self.history else 0) + self.every
-        return target if target <= step else None
+    def __post_init__(self) -> None:
+        if self.every <= 0:
+            raise ValueError(f"validation interval `every` must be positive, got {self.every!r}")
+        if self.window <= 0:
+            raise ValueError(f"convergence `window` must be positive, got {self.window!r}")
+        if not self.scenario_ids:
+            raise ValueError("validation scenario_ids must be non-empty")
+        self.scenario_ids = tuple(int(s) for s in self.scenario_ids)
 
-    def record(self, step: int, episodes: Sequence[Any]) -> dict[str, Any]:
-        """Record one checkpoint.  `episodes` is either a sequence of run_episode() dicts or a
-        sequence of delta_x numbers (the latter keeps the method usable in isolated tests)."""
+    def next_nominal(self) -> int:
+        """Next scheduled nominal checkpoint step."""
+        return (len(self.history) + 1) * self.every
+
+    def next_due(self, step: int) -> int | None:
+        """Scheduled nominal checkpoint crossed by `step` (the first one when several were skipped)."""
+        target = self.next_nominal()
+        return target if step >= target else None
+
+    def record(self, step: int, episodes: Sequence[Any], *, nominal_step: int | None = None,
+               episode: int | None = None, episode_step: int | None = None,
+               updates: int | None = None) -> dict[str, Any]:
+        """Record one checkpoint.  `step` is the actual training decision step at evaluation time.
+        When `exact_step=True`, `step` and `nominal_step` must equal the next scheduled nominal
+        mark.  `episodes` is either a sequence of run_episode() dicts or a sequence of delta_x
+        numbers (the latter keeps the method usable in isolated tests)."""
         if not episodes:
             raise ValueError("validation sample must be non-empty")
+        actual_step = int(step)
+        expected_nominal = self.next_nominal()
+        nom = expected_nominal if nominal_step is None else int(nominal_step)
+        if nom != expected_nominal:
+            raise ValueError(
+                f"validation nominal_step {nom} does not match expected checkpoint {expected_nominal}"
+            )
+        if self.exact_step and actual_step != expected_nominal:
+            raise ValueError(
+                f"exact-step validation expected step {expected_nominal}, got actual step {actual_step}"
+            )
+        if not self.exact_step and actual_step < expected_nominal:
+            raise ValueError(
+                f"actual validation step {actual_step} precedes nominal checkpoint {expected_nominal}"
+            )
+        if self.history and actual_step <= self.history[-1]["step"]:
+            raise ValueError(
+                f"validation steps must be strictly increasing ({actual_step} <= {self.history[-1]['step']})"
+            )
         if isinstance(episodes[0], dict):
             values = np.asarray([float(e["dx"]) for e in episodes], dtype=float)
             n_att = float(np.mean([e["N_att"] for e in episodes]))
@@ -290,13 +341,32 @@ class ValidationSchedule:
             n_att = n_blocked = v_eff = comp_rate = None
         if values.size == 0 or not np.all(np.isfinite(values)):
             raise ValueError("validation delta_x must be a non-empty finite sample")
-        row = {"step": int(step), "n": int(values.size),
-               "delta_x_mean": float(values.mean()), "delta_x_min": float(values.min()),
-               "delta_x_max": float(values.max()), "n_att_mean": n_att,
-               "n_blocked_mean": n_blocked, "v_eff_mean": v_eff, "comp_rate": comp_rate}
+        row = {
+            "step": actual_step,
+            "nominal_step": nom,
+            "episode": None if episode is None else int(episode),
+            "episode_step": None if episode_step is None else int(episode_step),
+            "updates": None if updates is None else int(updates),
+            "n": int(values.size),
+            "delta_x_mean": float(values.mean()),
+            "delta_x_min": float(values.min()),
+            "delta_x_max": float(values.max()),
+            "n_att_mean": n_att,
+            "n_blocked_mean": n_blocked,
+            "v_eff_mean": v_eff,
+            "comp_rate": comp_rate,
+        }
         self.history.append(row)
         return row
 
-    def s_conv(self) -> dict[str, Any]:
-        return compute_s_conv([r["step"] for r in self.history],
-                              [r["delta_x_mean"] for r in self.history], expected_interval=self.every)
+    def s_conv(self, *, window: int | None = None, rel_threshold: float | None = None,
+               max_sufficient_step: int | None = None) -> dict[str, Any]:
+        return compute_s_conv(
+            [r["step"] for r in self.history],
+            [r["delta_x_mean"] for r in self.history],
+            window=self.window if window is None else window,
+            rel_threshold=self.rel_threshold if rel_threshold is None else rel_threshold,
+            max_sufficient_step=(self.max_sufficient_step if max_sufficient_step is None
+                                 else max_sufficient_step),
+            expected_interval=self.every if self.exact_step else None,
+        )
