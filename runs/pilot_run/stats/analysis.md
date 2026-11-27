@@ -53,7 +53,7 @@ Start rule and classification rho: `experiments/h1.py` (correct start at rho = 1
 | B2 | 40.0000 | — | B2:40:0 | 4 | 4 | 1.0000 | 4 | 1.0 | 1.0000 | 0.4729 | exceeded |
 | B2 | 40.0000 | — | B2:40:1 | 4 | 4 | 0.7500 | 3 | 1.0 | 0.9873 | 0.2486 | exceeded |
 
-H1a (IUT over the 24 checks with rho in {0.6; 1.0}): **not confirmed** (0 confirmed, 0 exceeded). H1b (IUT over the 6 Baseline 2 checks): **confirmed** (6 exceeded, 0 confirmed). Checks with rho = 0.4 are the boundary level: descriptive, outside the decision.
+H1a (IUT over the 24 checks with rho in {0.6; 1.0}): **not confirmed** (0 confirmed, 0 exceeded). H1b (IUT over the 6 Baseline 2 checks): **confirmed** (6 exceeded, 0 confirmed). Checks with rho = 0.4 are the boundary level and checks with rho in {0.1; 0.2} violate rho >= tau_eff: both are descriptive and outside the H1a decision.
 
 Descriptive difference CR_ego_op(Proposed, mode B) − CR_ego_op(Baseline 2) on the common correct-start scenarios, two-factor cluster bootstrap (shared scenario multiplicities):
 
@@ -66,9 +66,37 @@ Descriptive difference CR_ego_op(Proposed, mode B) − CR_ego_op(Baseline 2) on 
 | 40.0000 | 0.6000 | -0.8750 | -1.0000 | -0.5000 | 4 | 0 | 2, 2 |
 | 40.0000 | 1.0000 | -0.8750 | -1.0000 | -0.5000 | 4 | 0 | 2, 2 |
 
+## Descriptive cell summary (all rho levels)
+
+All present arms and rho levels (including descriptive rho in {0.1; 0.2} s and boundary rho = 0.4 s). Descriptive levels rho in {0.1; 0.2} s are reported here and in the H1 table above, and excluded from primary H1a IUT, H2/H3 models, control M5, sensitivity, dispersion, contrasts and Page's test.
+
+| arm | D | rho | role | units | episodes | n_valid | CR_total | CR_ego_op | v_eff | N_exec/E | N_blocked/E | N_att/E | BLCR |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| A | 10.0000 | 0.4 | primary (H2/H3) / H1 boundary | 2 | 8 | 8 | 0.0000 | 0.0000 | 12.8872 | 0.0019 | 0.4044 | 0.4107 | 0.9847 |
+| A | 10.0000 | 0.6 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 9.3025 | 0.0000 | 0.3664 | 0.3720 | 0.9848 |
+| A | 10.0000 | 1.0 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 11.9049 | 0.0006 | 0.3920 | 0.3983 | 0.9840 |
+| A | 25.0000 | 0.4 | primary (H2/H3) / H1 boundary | 2 | 8 | 8 | 0.0000 | 0.0000 | 3.7329 | 0.0050 | 0.3325 | 0.3394 | 0.9797 |
+| A | 25.0000 | 0.6 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 4.8720 | 0.0063 | 0.3486 | 0.3567 | 0.9772 |
+| A | 25.0000 | 1.0 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 2.7548 | 0.0031 | 0.3266 | 0.3335 | 0.9792 |
+| A | 40.0000 | 0.4 | primary (H2/H3) / H1 boundary | 2 | 8 | 8 | 0.0000 | 0.0000 | 3.0354 | 0.0025 | 0.2827 | 0.2883 | 0.9805 |
+| A | 40.0000 | 0.6 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 2.2591 | 0.0013 | 0.2943 | 0.3012 | 0.9771 |
+| A | 40.0000 | 1.0 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 2.1362 | 0.0019 | 0.2881 | 0.2938 | 0.9807 |
+| B | 10.0000 | 0.4 | primary (H2/H3) / H1 boundary | 2 | 8 | 8 | 0.0000 | 0.0000 | 15.1512 | 0.0019 | 0.4587 | 0.4618 | 0.9932 |
+| B | 10.0000 | 0.6 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 9.3750 | 0.0000 | 0.5072 | 0.5097 | 0.9951 |
+| B | 10.0000 | 1.0 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 14.2308 | 0.0000 | 0.4178 | 0.4203 | 0.9940 |
+| B | 25.0000 | 0.4 | primary (H2/H3) / H1 boundary | 2 | 8 | 8 | 0.0000 | 0.0000 | 3.5284 | 0.0038 | 0.3529 | 0.3592 | 0.9826 |
+| B | 25.0000 | 0.6 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 4.0418 | 0.0057 | 0.4353 | 0.4428 | 0.9830 |
+| B | 25.0000 | 1.0 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 1.9435 | 0.0025 | 0.3563 | 0.3619 | 0.9844 |
+| B | 40.0000 | 0.4 | primary (H2/H3) / H1 boundary | 2 | 8 | 8 | 0.0000 | 0.0000 | 1.6390 | 0.0025 | 0.2946 | 0.3002 | 0.9812 |
+| B | 40.0000 | 0.6 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 3.6915 | 0.0019 | 0.3482 | 0.3525 | 0.9876 |
+| B | 40.0000 | 1.0 | primary (H1a, H2/H3) | 2 | 8 | 8 | 0.0000 | 0.0000 | 0.6881 | 0.0038 | 0.3682 | 0.3744 | 0.9832 |
+| B2 | 10.0000 | — | H1b | 2 | 8 | 8 | 1.0000 | 1.0000 | 5.7012 | 0.1228 | 0.0000 | 0.5064 | 0.0000 |
+| B2 | 25.0000 | — | H1b | 2 | 8 | 8 | 1.0000 | 1.0000 | 1.8507 | 0.1034 | 0.0000 | 0.5201 | 0.0000 |
+| B2 | 40.0000 | — | H1b | 2 | 8 | 8 | 0.8750 | 0.8750 | 1.4813 | 0.0687 | 0.0000 | 0.3626 | 0.0000 |
+
 ## H2 / H3: seven primary checks
 
-Covariates: Dc = (D − 25) / 10, rhoc = rho − 2/3 (grid means), mode = 1 for mode B. One-sided p: parametric bootstrap of the signed likelihood root under the null model; Holm over the seven checks in each analysis; sensitivity: two-way cluster bootstrap that keeps shared scenario ids.
+Selected rows: rho in {0.4; 0.6; 1.0} s (mode B for H2, modes A and B for H3 and M5; descriptive rho in {0.1; 0.2} s excluded). Covariates: Dc = (D − 25) / 10, rhoc = rho − 2/3 (grid means), mode = 1 for mode B. One-sided p: parametric bootstrap of the signed likelihood root under the null model; Holm over the seven checks in each analysis; sensitivity: two-way cluster bootstrap that keeps shared scenario ids.
 
 | check | function | model | estimate | SE | signed root | p (bootstrap) | B / B_conv | stationary share | p Holm | converged (via) | sens. estimate | sens. 95 % interval | sens. p | sens. p Holm | outcome |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|

@@ -1,11 +1,15 @@
 """Regression tests for remark 3: density deficit, route progress, cut-in events, S_conv and the
-validation schedule; and for the three-valued pilot acceptance of remark 4."""
+validation schedule (including exact-step mid-episode validation on the real DQN training path);
+and for the three-valued pilot acceptance of remark 4."""
+from types import SimpleNamespace
+
+import numpy as np
 import pytest
 
-from experiments.metrics import (CutInTracker, DensityTracker, RouteProgressTracker, VehSnap,
-                                 ValidationSchedule, compute_s_conv, pair_is_dangerous,
-                                 target_distance_L)
-from experiments.pilot import evaluate_pilot_status
+from experiments.metrics import (VAL_HISTORY_COLUMNS, CutInTracker, DensityTracker,
+                                 RouteProgressTracker, VehSnap, ValidationSchedule, compute_s_conv,
+                                 pair_is_dangerous, target_distance_L)
+from experiments.pilot import evaluate_pilot_status, train
 
 
 # ---------------------------------------------------------------- density
@@ -142,6 +146,112 @@ def test_validation_history_keeps_ap_and_outcome_aggregates():
     assert row["delta_x_mean"] == 2.0
     assert row["n_att_mean"] == 3.0 and row["n_blocked_mean"] == 1.5
     assert row["v_eff_mean"] == 12.0 and row["comp_rate"] == 0.5
+    assert tuple(row.keys()) == VAL_HISTORY_COLUMNS
+    assert row["step"] == 5000 and row["nominal_step"] == 5000
+
+
+def test_validation_schedule_and_s_conv_guardrails():
+    with pytest.raises(ValueError):
+        ValidationSchedule(every=0)
+    with pytest.raises(ValueError):
+        ValidationSchedule(every=-100)
+    with pytest.raises(ValueError):
+        ValidationSchedule(scenario_ids=())
+
+    v = ValidationSchedule(every=5000)
+    with pytest.raises(ValueError):
+        v.record(5040, [100.0])                     # overshoot rejected in exact-step mode
+    with pytest.raises(ValueError):
+        v.record(5000, [100.0], nominal_step=10000) # mismatched nominal mark rejected
+    assert v.history == []
+
+    # compute_s_conv must reject invalid spacing / monotonicity / NaN even with < window points
+    with pytest.raises(ValueError):
+        compute_s_conv([5040, 10080], [100.0, 110.0])
+    with pytest.raises(ValueError):
+        compute_s_conv([5000, 5000], [100.0, 110.0])
+    with pytest.raises(ValueError):
+        compute_s_conv([5000], [float("nan")])
+    one = compute_s_conv([5000], [420.0])
+    assert one["status"] == "insufficient_checkpoints" and one["x_max"] == pytest.approx(420.0)
+
+
+def test_train_exact_step_validation_mid_episode_and_bit_exact_invariance(tmp_path):
+    """Real DQN training path (Proposed, Mode B): checkpoints occur strictly mid-episode when
+    `every` does not divide episode length (including two checkpoints inside one episode), record
+    exact step/nominal/updates context, compute a full 4-point S_conv, and leave training state and
+    RNG 100% bit-identical to a run without validation."""
+    args = SimpleNamespace(D=10, rho=0.6, seed=42, steps=150, max_steps=150, learning_starts=20)
+    seeds = [900_040, 900_041, 900_042]
+    cache = str(tmp_path / "cache")
+    env_cfg = dict(warmup=2.0, duration=10)         # 50 decision steps per full episode
+    dqn_kw = dict(batch_size=16)
+    val = ValidationSchedule(every=35, scenario_ids=(10_000, 10_001))
+
+    agent_v, slog_v, eps_v, _ = train(
+        args, seeds, cache, lambda _msg: None,
+        shield_on=True, reward_kind="Rv", validation=val,
+        env_config=env_cfg, dqn_kwargs=dqn_kw,
+    )
+    agent_0, slog_0, eps_0, _ = train(
+        args, seeds, cache, lambda _msg: None,
+        shield_on=True, reward_kind="Rv", validation=None,
+        env_config=env_cfg, dqn_kwargs=dqn_kw,
+    )
+
+    assert len(val.history) == 4
+    assert [r["step"] for r in val.history] == [35, 70, 105, 140]
+    assert [r["nominal_step"] for r in val.history] == [35, 70, 105, 140]
+    assert [r["episode"] for r in val.history] == [0, 1, 2, 2]
+    assert [r["episode_step"] for r in val.history] == [35, 20, 5, 40]
+    assert [r["updates"] for r in val.history] == [16, 51, 86, 121]
+    for r in val.history:
+        assert tuple(r.keys()) == VAL_HISTORY_COLUMNS
+        assert r["n"] == 2
+        assert np.isfinite(r["delta_x_mean"]) and r["delta_x_mean"] > 0.0
+        assert np.isfinite(r["v_eff_mean"]) and np.isfinite(r["n_att_mean"])
+        assert np.isfinite(r["n_blocked_mean"]) and 0.0 <= r["comp_rate"] <= 1.0
+
+    sc = val.s_conv()
+    assert sc["status"] in {"converged", "not_converged", "late_convergence"}
+    assert sc["x_max"] > 0.0 and sc["threshold"] == pytest.approx(0.95 * sc["x_max"])
+
+    # Bit-exact invariance: mid-episode validation does not perturb training weights, buffer, or RNG
+    assert agent_v.steps == agent_0.steps == 150
+    assert agent_v.updates == agent_0.updates == 131
+    assert all(np.array_equal(a, b) for a, b in zip(agent_v.params, agent_0.params))
+    assert all(np.array_equal(a, b) for a, b in zip(agent_v.target, agent_0.target))
+    assert agent_v.buffer.size == agent_0.buffer.size
+    assert np.array_equal(agent_v.buffer.R[:agent_v.buffer.size],
+                          agent_0.buffer.R[:agent_0.buffer.size])
+    assert agent_v.rng.bit_generator.state == agent_0.rng.bit_generator.state
+    assert [e["ret"] for e in eps_v] == [e["ret"] for e in eps_0]
+    assert len(slog_v) == len(slog_0)
+    # Validation time must stay outside per-step t_learn
+    assert sum(e["t_learn"] for e in eps_v) < 0.5
+
+
+def test_train_exact_step_validation_with_crashing_baseline2_episodes(tmp_path):
+    """Unshielded Baseline 2 episodes terminate at variable crash lengths, yet validation triggers
+    at exact nominal steps without overshoot."""
+    args = SimpleNamespace(D=25, rho=0.6, seed=42, steps=120, max_steps=120, learning_starts=20)
+    seeds = list(range(900_040, 900_060))
+    cache = str(tmp_path / "cache")
+    val = ValidationSchedule(every=30, scenario_ids=(10_000, 10_001))
+
+    agent, _, eps, _ = train(
+        args, seeds, cache, lambda _msg: None,
+        shield_on=False, reward_kind="RS", validation=val,
+        env_config=dict(warmup=2.0, duration=10), dqn_kwargs=dict(batch_size=16),
+    )
+
+    assert any(e["crashed"] and e["steps"] < 50 for e in eps)
+    assert [r["step"] for r in val.history] == [30, 60, 90, 120]
+    assert [r["nominal_step"] for r in val.history] == [30, 60, 90, 120]
+    assert [r["updates"] for r in val.history] == [11, 41, 71, 101]
+    assert agent.steps >= 120
+    sc = val.s_conv()
+    assert sc["status"] != "insufficient_checkpoints" and sc["x_max"] > 0.0
 
 
 # ---------------------------------------------------------------- pilot acceptance

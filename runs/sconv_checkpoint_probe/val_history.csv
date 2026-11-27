@@ -1,0 +1,2 @@
+step,nominal_step,episode,episode_step,updates,n,delta_x_mean,delta_x_min,delta_x_max,n_att_mean,n_blocked_mean,v_eff_mean,comp_rate
+5000,5000,24,200,4001,20,971.0440232544213,920.5130095066836,1047.0895781792053,0.0,0.0,24.27610058136053,1.0

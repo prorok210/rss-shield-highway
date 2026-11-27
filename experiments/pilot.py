@@ -44,6 +44,7 @@ import json  # noqa: E402
 import platform  # noqa: E402
 import subprocess  # noqa: E402
 import sys  # noqa: E402
+import tempfile  # noqa: E402
 import time  # noqa: E402
 from importlib import metadata  # noqa: E402
 from pathlib import Path  # noqa: E402
@@ -55,7 +56,8 @@ from experiments import h1  # noqa: E402
 from experiments.env import FAST_ROAD, THREAD_VARS, make_env, reset_cached  # noqa: E402
 from experiments.generator import (I_BRAKE, I_LANE, I_SPEED, N_KIN, QUEUE_CODES, RHOS,  # noqa: E402
                                    SPEED_SEEN, initially_unsafe, window_bounds)
-from experiments.metrics import ValidationSchedule  # noqa: E402
+from experiments.metrics import (VAL_EVERY, VAL_HISTORY_COLUMNS, VAL_SCENARIOS,  # noqa: E402
+                                 VAL_WINDOW, ValidationSchedule)
 from experiments.runner import JERK_JUMP, NAMES, mask_str, run_episode  # noqa: E402
 from rss_shield.accounting import LANE_CHANGES  # noqa: E402
 from rss_shield.params import ABORT, ACTION_INDEX, LANE_WIDTH, WIDTH  # noqa: E402
@@ -115,14 +117,15 @@ def table(header, rows):
     return "\n".join(out)
 
 
-def write_csv(path, rows):
-    if not rows:
+def write_csv(path, rows, fieldnames=None):
+    if not rows and fieldnames is None:
         return
-    keys = list(rows[0].keys())
+    keys = list(fieldnames) if fieldnames is not None else list(rows[0].keys())
     with open(path, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
         w.writeheader()
-        w.writerows(rows)
+        if rows:
+            w.writerows(rows)
 
 
 def to_json(obj):
@@ -200,24 +203,63 @@ def start_summary(D, infos):
 
 
 def train(args, seeds, cache, log, shield_on=True, reward_kind="Rv", steps=None, max_steps=None,
-          learning_starts=None, tag="Proposed", validation=None):
+          learning_starts=None, tag="Proposed", validation=None, env_config=None,
+          val_env_config=None, dqn_kwargs=None):
     """Training on the cycled training seeds. Proposed (shield_on=True): the budget is extended up
     to max_steps while the buffer holds no transition with n > 1. Baselines (no filter, every
-    transition has n = 1): exactly the budget."""
-    env = make_env(D=args.D)
+    transition has n = 1): exactly the budget. When `validation` is provided, checkpoints are
+    evaluated at the exact nominal decision step via `run_episode(..., on_step=...)` on a separate
+    `val_env` without disturbing the training environment, transition assembler, or RNG."""
+    train_cfg = dict(env_config or {})
+    val_cfg = dict(train_cfg if val_env_config is None else val_env_config)
+    env = make_env(D=args.D, **train_cfg)
     steps = args.steps if steps is None else steps
     max_steps = args.max_steps if max_steps is None else max_steps
-    agent = DQN(seed=args.seed,
-                learning_starts=args.learning_starts if learning_starts is None else learning_starts)
+    dqn_cfg = dict(dqn_kwargs or {})
+    dqn_cfg.setdefault("seed", args.seed)
+    dqn_cfg.setdefault("learning_starts",
+                       args.learning_starts if learning_starts is None else learning_starts)
+    agent = DQN(**dqn_cfg)
     steps_log, episodes = [], []
-    val_env = make_env(D=args.D) if validation is not None else None
+    val_env = make_env(D=args.D, **val_cfg) if validation is not None else None
     ep = 0
     t0 = time.perf_counter()
+
+    def _on_step(ep_step):
+        target = validation.next_due(agent.steps)
+        if target is None:
+            return
+        if validation.exact_step and agent.steps != target:
+            raise RuntimeError(
+                f"validation step mismatch: actual agent.steps={agent.steps} != target={target}"
+            )
+        sample = [
+            run_episode(
+                val_env, agent, rho=args.rho, shield_on=shield_on,
+                reward_kind=reward_kind, explore=False,
+                reset=(lambda s=s: reset_cached(val_env, s, cache)) if cache is not None else None,
+                seed=None if cache is not None else s,
+                episode=s,
+            )
+            for s in validation.scenario_ids
+        ]
+        row = validation.record(
+            agent.steps, sample, nominal_step=target, episode=ep,
+            episode_step=ep_step, updates=agent.updates,
+        )
+        log(f"  {tag} validation at step {row['step']} (nominal {row['nominal_step']}, "
+            f"ep {ep} step {ep_step}, updates {row['updates']}): "
+            f"Δx {row['delta_x_mean']:.3f} m (min {row['delta_x_min']:.3f}, "
+            f"max {row['delta_x_max']:.3f})")
+
+    step_cb = _on_step if validation is not None else None
     while True:
         seed = seeds[ep % len(seeds)]
         c = run_episode(env, agent, rho=args.rho, shield_on=shield_on, reward_kind=reward_kind,
                         train=True, explore=True, episode=ep,
-                        reset=lambda s=seed: reset_cached(env, s, cache), steps_log=steps_log)
+                        reset=(lambda s=seed: reset_cached(env, s, cache)) if cache is not None else None,
+                        seed=None if cache is not None else seed,
+                        steps_log=steps_log, on_step=step_cb)
         c.update(episode=ep, seed=seed, total_steps=agent.steps, epsilon=agent.epsilon(),
                  buffer=agent.buffer.size, loss=agent.last_loss)
         episodes.append(c)
@@ -226,15 +268,6 @@ def train(args, seeds, cache, log, shield_on=True, reward_kind="Rv", steps=None,
             f"total {agent.steps:5d} eps {agent.epsilon():.3f} buffer {agent.buffer.size:5d} "
             f"loss {fmt(agent.last_loss, 4)}")
         ep += 1
-        if validation is not None:
-            target = validation.next_due(agent.steps)
-            if target is not None:
-                sample = [run_episode(val_env, agent, rho=args.rho, shield_on=shield_on,
-                                      reward_kind=reward_kind, explore=False, seed=s,
-                                      episode=s) for s in validation.scenario_ids]
-                row = validation.record(target, sample)
-                log(f"  {tag} validation at {target}: Δx {row['delta_x_mean']:.3f} m "
-                    f"(min {row['delta_x_min']:.3f}, max {row['delta_x_max']:.3f})")
         multi = bool((agent.buffer.n[:agent.buffer.size] > 1).any())
         if agent.steps >= steps and (multi or not shield_on or agent.steps >= max_steps):
             break
@@ -931,17 +964,24 @@ def report(args, R):
         a("")
     sc = R.get("s_conv")
     if sc is not None:
+        vc = R.get("val_cfg") or dict(every=VAL_EVERY, window=VAL_WINDOW,
+                                      n_scenarios=len(VAL_SCENARIOS),
+                                      scenario_min=min(VAL_SCENARIOS),
+                                      scenario_max=max(VAL_SCENARIOS), exact_step=True)
+        rule = "на точной отметке шага" if vc.get("exact_step", True) else "на границе эпизода"
         a("## 12. Сходимость по валидации (Sconv, п. 7.7)")
         a("")
         if sc["status"] == "insufficient_checkpoints":
-            a(f"Контрольных точек {len(R.get('val_history', []))} из {4} (валидация каждые 5000 шагов "
-              "решения, 20 сценариев 10 000–10 019, ε = 0). Пилот короче первого чекпойнта, поэтому "
-              "Sconv не проверяется: статус `insufficient_checkpoints`. Полный прогон основной серии "
-              "пишет `val_history.csv` и `s_conv.json` через `experiments.metrics.ValidationSchedule`.")
+            a(f"Контрольных точек {len(R.get('val_history', []))} из {vc['window']} "
+              f"(валидация каждые {vc['every']} шагов решения {rule}, "
+              f"{vc['n_scenarios']} сценариев {vc['scenario_min']}–{vc['scenario_max']}, ε = 0). "
+              "Контрольных точек меньше окна сходимости, поэтому Sconv не проверяется: статус "
+              "`insufficient_checkpoints`. Полный прогон основной серии пишет `val_history.csv` и "
+              "`s_conv.json` через `experiments.metrics.ValidationSchedule`.")
         else:
-            a(f"Точек: {len(R.get('val_history', []))}; Sconv = {fmt(sc['s_conv'])}; "
-              f"бюджет достаточен: {fmt(sc['budget_sufficient'])}; статус `{sc['status']}`; "
-              f"максимум Δxval = {fmt(sc['x_max'], 2)} м.")
+            a(f"Точек: {len(R.get('val_history', []))} (каждые {vc['every']} шагов, {rule}); "
+              f"Sconv = {fmt(sc['s_conv'])}; бюджет достаточен: {fmt(sc['budget_sufficient'])}; "
+              f"статус `{sc['status']}`; максимум Δxval = {fmt(sc['x_max'], 2)} м.")
         a("")
     a("## Время")
     a("")
@@ -990,6 +1030,97 @@ def _status(ok, unverified=False):
     return "pass" if ok else ("unverified" if unverified else "fail")
 
 
+def _validation_cfg(validation):
+    return dict(
+        every=validation.every,
+        window=validation.window,
+        rel_threshold=validation.rel_threshold,
+        max_sufficient_step=validation.max_sufficient_step,
+        exact_step=validation.exact_step,
+        n_scenarios=len(validation.scenario_ids),
+        scenario_min=min(validation.scenario_ids),
+        scenario_max=max(validation.scenario_ids),
+    )
+
+
+def run_sconv_probe(args, seeds, out, log):
+    """Short end-to-end training + exact-step validation checkpoint probe on the real DQN path.
+    Writes only lightweight artifacts (`val_history.csv`, `s_conv.json`, `train_episodes.csv`,
+    `summary.json`) without leaving start-state caches or model checkpoints in `out`."""
+    if not (1 <= args.val_scenarios <= len(VAL_SCENARIOS)):
+        raise ValueError(f"--val-scenarios must be in 1..{len(VAL_SCENARIOS)}, got {args.val_scenarios}")
+    journal = machine_journal()
+    log("sconv_probe journal: " + to_json(journal))
+    validation = ValidationSchedule(
+        every=args.val_every,
+        scenario_ids=VAL_SCENARIOS[:args.val_scenarios],
+    )
+    tmp_ctx = None if args.cache_dir else tempfile.TemporaryDirectory(prefix="rss_sconv_probe_")
+    cache = args.cache_dir if args.cache_dir else tmp_ctx.name
+    try:
+        t0 = time.perf_counter()
+        log(f"[sconv-probe] training Proposed (D={args.D}, rho={args.rho}, steps={args.steps}, "
+            f"val_every={validation.every}, val_scenarios={len(validation.scenario_ids)})")
+        agent, steps_log, episodes, t_train = train(
+            args, seeds["train"], cache, log,
+            steps=args.steps, max_steps=args.steps,
+            learning_starts=args.learning_starts,
+            tag="Proposed", validation=validation,
+        )
+        wall_s = time.perf_counter() - t0
+    finally:
+        if tmp_ctx is not None:
+            tmp_ctx.cleanup()
+
+    _, chk = check_transitions(agent, steps_log)
+    tot = totals(episodes)
+    n_steps = max(tot["steps"], 1)
+    s_conv = validation.s_conv()
+    val_cfg = _validation_cfg(validation)
+    timing = dict(
+        wall_s=wall_s,
+        train_and_val_s=t_train,
+        env_ms=1e3 * sum(c["t_env"] for c in episodes) / n_steps,
+        shield_ms=1e3 * sum(c["t_shield"] for c in episodes) / n_steps,
+        policy_ms=1e3 * sum(c["t_policy"] for c in episodes) / n_steps,
+        learn_ms=1e3 * sum(c["t_learn"] for c in episodes) / n_steps,
+    )
+    train_summary = dict(
+        steps=agent.steps, episodes=len(episodes), E=tot["E"], intercept=tot["intercept"],
+        crashes=tot["crashes"], stored=agent.buffer.size,
+        dropped=sum(c["dropped"] for c in episodes), updates=agent.updates,
+        epsilon=agent.epsilon(), loss=agent.last_loss, time=t_train,
+    )
+    write_csv(out / "val_history.csv", validation.history, fieldnames=VAL_HISTORY_COLUMNS)
+    (out / "s_conv.json").write_text(to_json(s_conv) + "\n", encoding="utf-8")
+    write_csv(out / "train_episodes.csv", episodes)
+    clean = dict(start=0, inner=0, next=0)
+    exact_ok = bool(validation.history) and all(
+        r["step"] == r["nominal_step"] for r in validation.history
+    )
+    buffer_ok = chk["bad"] == clean and chk["max_dR"] < 1e-9
+    ok = exact_ok and buffer_ok and bool(tot["main_series"])
+    summary = dict(
+        probe=True,
+        ok=ok,
+        args=vars(args),
+        journal_machine=journal,
+        val_cfg=val_cfg,
+        val_history=validation.history,
+        s_conv=s_conv,
+        train=train_summary,
+        train_total=tot,
+        check=chk,
+        timing=timing,
+        vmax=dict(SPEED_SEEN),
+    )
+    (out / "summary.json").write_text(to_json(summary) + "\n", encoding="utf-8")
+    log(f"sconv_probe: checkpoints={len(validation.history)} exact_ok={exact_ok} "
+        f"buffer_ok={buffer_ok} main_series={tot['main_series']} wall={wall_s:.2f}s")
+    log("s_conv: " + to_json(s_conv))
+    return 0 if ok else 1
+
+
 # ---------------------------------------------------------------------- main
 def main(argv=None):
     p = argparse.ArgumentParser(description="Short end-to-end pilot (protocol, section 8)")
@@ -1002,6 +1133,14 @@ def main(argv=None):
     p.add_argument("--learning-starts", type=int, default=1000)
     p.add_argument("--base-steps", type=int, default=BASE_STEPS)
     p.add_argument("--base-learning-starts", type=int, default=BASE_LEARNING_STARTS)
+    p.add_argument("--val-every", type=int, default=VAL_EVERY,
+                   help="decision steps between exact-step validation checkpoints")
+    p.add_argument("--val-scenarios", type=int, default=len(VAL_SCENARIOS),
+                   help="number of fixed validation scenarios from 10000..")
+    p.add_argument("--cache-dir", default=None,
+                   help="optional start-state cache directory (default: <out>/start_states, or temp dir in --sconv-probe)")
+    p.add_argument("--sconv-probe", action="store_true",
+                   help="short end-to-end training + validation checkpoint probe only (lightweight artifacts)")
     p.add_argument("--quick", action="store_true", help="smoke run: fewer seeds and steps")
     p.add_argument("--mode", choices=("strict", "diagnostic"), default="strict",
                    help="strict: OK only if every check is pass; diagnostic: never OK, unverified allowed")
@@ -1013,10 +1152,16 @@ def main(argv=None):
         args.base_steps, args.base_learning_starts = 200, 100
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    cache = str(out / "start_states")
 
     def log(msg):
         print(msg, flush=True)
+
+    if args.sconv_probe:
+        return run_sconv_probe(args, seeds, out, log)
+
+    if not (1 <= args.val_scenarios <= len(VAL_SCENARIOS)):
+        raise ValueError(f"--val-scenarios must be in 1..{len(VAL_SCENARIOS)}, got {args.val_scenarios}")
+    cache = args.cache_dir if args.cache_dir else str(out / "start_states")
 
     journal = machine_journal()
     (out / "journal.md").write_text(
@@ -1044,17 +1189,16 @@ def main(argv=None):
 
     t0 = time.perf_counter()
     log("[2/10] training (Proposed)")
-    validation = ValidationSchedule()
+    validation = ValidationSchedule(
+        every=args.val_every,
+        scenario_ids=VAL_SCENARIOS[:args.val_scenarios],
+    )
     agent, steps_log, episodes, t_train = train(args, seeds["train"], cache, log,
                                                  validation=validation)
+    R["val_cfg"] = _validation_cfg(validation)
     R["val_history"] = validation.history
     R["s_conv"] = validation.s_conv()
-    if validation.history:
-        write_csv(out / "val_history.csv", validation.history)
-    else:
-        (out / "val_history.csv").write_text(
-            "step,n,delta_x_mean,delta_x_min,delta_x_max,n_att_mean,n_blocked_mean,"
-            "v_eff_mean,comp_rate\n", encoding="utf-8")
+    write_csv(out / "val_history.csv", validation.history, fieldnames=VAL_HISTORY_COLUMNS)
     (out / "s_conv.json").write_text(to_json(R["s_conv"]), encoding="utf-8")
     write_csv(out / "train_episodes.csv", episodes)
     tot = totals(episodes)

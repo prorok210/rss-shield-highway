@@ -47,9 +47,12 @@ from itertools import permutations
 import numpy as np
 from scipy import special, stats
 
+from analysis.design import (DesignSpec, normalize_mode, parse_rho,
+                             select_h2_rows, select_h3_rows)
 from analysis.models import LMM, BetaBinGLMM, NB2GLMM, bootstrap_signed_root
 
 D_CENTER, D_UNIT, RHO_CENTER = 25.0, 10.0, 2.0 / 3.0
+H23_RHOS = DesignSpec().h23_rhos
 ALPHA = 0.05
 ESTABLISHED = "established"
 
@@ -69,13 +72,34 @@ H2_TERMS = ("Intercept", "D", "rho", "D:rho")
 H3_TERMS = ("Intercept", "mode", "D", "rho")
 
 
+def _mode_set(modes):
+    if isinstance(modes, str):
+        if modes in ("A", "B", "B2"):
+            return {modes}
+        if modes == "AB":
+            return {"A", "B"}
+        raise ValueError(f"unsupported mode specification: {modes!r}")
+    return {normalize_mode(m) for m in modes}
+
+
+def _select_mode_rho(rows, modes, rhos):
+    allowed_modes = _mode_set(modes)
+    if rhos is None:
+        return [r for r in rows if normalize_mode(r.get("mode")) in allowed_modes]
+    allowed_rhos = frozenset(round(float(r), 6) for r in rhos)
+    return [r for r in rows
+            if normalize_mode(r.get("mode")) in allowed_modes
+            and parse_rho(r.get("rho")) in allowed_rhos]
+
+
 def columns(rows, keep=None):
     """Rows (dicts) -> dict of arrays; keep: boolean function of a row."""
     rows = [r for r in rows if keep is None or keep(r)]
     num = ("D", "rho", "v_eff", "E", "N_exec", "N_blocked", "N_att")
     out = {k: np.array([float(r[k]) for r in rows]) for k in num}
-    for k in ("mode", "unit", "unit_seed", "episode_seed"):
-        out[k] = np.array([str(r[k]) for r in rows])
+    out["mode"] = np.array([normalize_mode(r["mode"]) for r in rows])
+    for k in ("unit", "unit_seed", "episode_seed"):
+        out[k] = np.array([str(r[k]).strip() for r in rows])
     return out
 
 
@@ -84,32 +108,32 @@ def design(cols, terms):
 
 
 # ---------------------------------------------------------------------- models M1 - M5
-def model_veff(rows):
-    c = columns(rows, lambda r: r["mode"] == "B")
+def model_veff(rows, *, rhos=H23_RHOS):
+    c = columns(select_h2_rows(rows, rhos=rhos))
     X, names = design(c, H2_TERMS)
     return LMM(c["v_eff"], X, names, c["unit"])
 
 
-def model_nexec(rows):
-    c = columns(rows, lambda r: r["mode"] == "B" and float(r["E"]) > 0)
+def model_nexec(rows, *, rhos=H23_RHOS):
+    c = columns(select_h2_rows(rows, rhos=rhos), lambda r: float(r["E"]) > 0)
     X, names = design(c, H2_TERMS)
     return NB2GLMM(c["N_exec"], X, names, c["unit"], offset=np.log(c["E"]))
 
 
-def model_nblocked(rows):
-    c = columns(rows, lambda r: r["mode"] in "AB" and float(r["E"]) > 0)
+def model_nblocked(rows, *, rhos=H23_RHOS):
+    c = columns(select_h3_rows(rows, rhos=rhos), lambda r: float(r["E"]) > 0)
     X, names = design(c, H3_TERMS)
     return NB2GLMM(c["N_blocked"], X, names, c["unit"], offset=np.log(c["E"]))
 
 
-def model_pblock(rows):
-    c = columns(rows, lambda r: r["mode"] in "AB" and float(r["N_att"]) > 0)
+def model_pblock(rows, *, rhos=H23_RHOS):
+    c = columns(select_h3_rows(rows, rhos=rhos), lambda r: float(r["N_att"]) > 0)
     X, names = design(c, H3_TERMS)
     return BetaBinGLMM(c["N_blocked"], X, names, c["unit"], trials=c["N_att"])
 
 
-def model_natt(rows):
-    c = columns(rows, lambda r: r["mode"] in "AB" and float(r["E"]) > 0)
+def model_natt(rows, *, rhos=H23_RHOS):
+    c = columns(select_h3_rows(rows, rhos=rhos), lambda r: float(r["E"]) > 0)
     X, names = design(c, H3_TERMS)
     return NB2GLMM(c["N_att"], X, names, c["unit"], offset=np.log(c["E"]))
 
@@ -266,10 +290,11 @@ def two_way_resampler(c):
     return draw
 
 
-def sensitivity(rows, check, n_boot, rng, level=0.95):
+def sensitivity(rows, check, n_boot, rng, level=0.95, *, rhos=H23_RHOS):
     """Two-way cluster bootstrap (units x shared scenarios) of the aggregate linear model."""
-    modes = "B" if check.hypothesis == "H2" else "AB"
-    c = columns(rows, lambda r: r["mode"] in modes)
+    selected = (select_h2_rows(rows, rhos=rhos) if check.hypothesis == "H2"
+                else select_h3_rows(rows, rhos=rhos))
+    c = columns(selected)
     ones = np.ones(len(c["D"]))
     agg = _aggregate(c, ones, check.kind, check.outcome)
     est = None if agg is None else _wls(c, agg[0], agg[1], ones, check.terms, check.term)
@@ -319,9 +344,9 @@ def cell_means(c, w=None, outcome="v_eff"):
     return out
 
 
-def bootstrap_cells(rows, outcome, n_boot, rng, modes="B"):
+def bootstrap_cells(rows, outcome, n_boot, rng, modes="B", rhos=H23_RHOS):
     """Cell means of the data and of n_boot two-way cluster bootstrap replicates."""
-    c = columns(rows, lambda r: r["mode"] in modes)
+    c = columns(_select_mode_rho(rows, modes, rhos))
     draw = two_way_resampler(c)
     reps = []
     for _ in range(n_boot):
@@ -418,10 +443,10 @@ def page_test(table):
     return r["L"], r["p_value"], r["method"]
 
 
-def trend_table(rows, outcome, over, modes="B"):
+def trend_table(rows, outcome, over, modes="B", rhos=H23_RHOS):
     """Blocks x ordered levels of `over` ("rho" or "D"): unit means; a block is the other factor
     and the unit seed. Incomplete blocks are dropped."""
-    c = columns(rows, lambda r: r["mode"] in modes)
+    c = columns(_select_mode_rho(rows, modes, rhos))
     other = "D" if over == "rho" else "rho"
     levels = sorted(set(c[over]))
     table = []
@@ -437,11 +462,11 @@ def trend_table(rows, outcome, over, modes="B"):
     return levels, np.array(table)
 
 
-def dispersion(rows, outcome, terms, modes, trials=None):
+def dispersion(rows, outcome, terms, modes, trials=None, rhos=H23_RHOS):
     """Pearson dispersion of the model without the random effect and without overdispersion
     (Poisson with offset log E, or binomial): values well above 1 call for NB2 / beta-binomial."""
     need = "N_att" if trials else "E"
-    c = columns(rows, lambda r: r["mode"] in modes and float(r[need]) > 0)
+    c = columns(_select_mode_rho(rows, modes, rhos), lambda r: float(r[need]) > 0)
     X, _ = design(c, terms)
     y = c[outcome]
     beta = np.zeros(X.shape[1])

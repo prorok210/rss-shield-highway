@@ -19,9 +19,14 @@ import numpy as np
 
 from analysis import binomial as B
 from analysis import plan as P
-from analysis.design import DesignCompletenessError, validate_design_completeness
+from analysis.design import (DesignCompletenessError, DesignSpec, normalize_mode, parse_bool,
+                             parse_rho, select_descriptive_rows, select_h1_diff_rows,
+                             select_h2_rows, select_h3_rows, validate_design_completeness)
 
-H1_RHOS = (0.6, 1.0)           # rho levels of H1a; 0.4 is the boundary level (descriptive)
+SPEC = DesignSpec()
+H1_RHOS = SPEC.h1a_rhos           # rho levels of H1a; 0.4 is boundary, 0.1 / 0.2 are descriptive
+H23_RHOS = SPEC.h23_rhos          # rho levels of H2 and H3 (rho >= tau_eff)
+DESCRIPTIVE_RHOS = SPEC.descriptive_rhos
 
 
 def read(path):
@@ -29,33 +34,57 @@ def read(path):
         return list(csv.DictReader(fh))
 
 
-def flag(v):
-    return str(v) in ("1", "True", "true")
+def _rho_str(rho):
+    return "" if rho is None else str(rho)
+
+
+def _rho_role(mode, rho, spec=SPEC):
+    if mode == spec.b2_arm:
+        return "H1b"
+    if rho in set(spec.descriptive_rhos):
+        return "descriptive (rho < tau_eff)"
+    if rho in set(spec.h1a_rhos):
+        return "primary (H1a, H2/H3)"
+    if rho in set(spec.h23_rhos):
+        return "primary (H2/H3) / H1 boundary"
+    return "descriptive"
 
 
 def h1_checks(rows):
-    """One check per policy x mode x D x rho (filtered arms) or per policy x D (Baseline 2)."""
+    """One check per policy x mode x D x rho (filtered arms) or per policy x D (Baseline 2).
+    Includes descriptive rho levels (0.1, 0.2, 0.4 s) alongside H1a levels (0.6, 1.0 s)."""
     groups = {}
     for r in rows:
-        key = (r["mode"], float(r["D"]), r["rho"], r["unit"])
+        mode = normalize_mode(r["mode"])
+        D = float(r["D"])
+        rho = None if mode == SPEC.b2_arm else parse_rho(r.get("rho"))
+        unit = str(r["unit"]).strip()
+        key = (mode, D, rho, unit)
         groups.setdefault(key, []).append(r)
     out = []
-    for (mode, D, rho, unit), ep in sorted(groups.items()):
-        valid = [r for r in ep if flag(r["correct_start"])]
-        x = sum(flag(r["h1_event"]) for r in valid)
+    ordered = sorted(groups.items(),
+                     key=lambda kv: (kv[0][0], kv[0][1], -1.0 if kv[0][2] is None else kv[0][2], kv[0][3]))
+    for (mode, D, rho, unit), ep in ordered:
+        valid = [r for r in ep if parse_bool(r["correct_start"], "correct_start")]
+        x = sum(parse_bool(r["h1_event"], "h1_event") for r in valid)
         n = len(valid)
-        out.append(dict(mode=mode, D=D, rho=rho, unit=unit, n=len(ep), n_valid=n, events=x,
-                        rho_cls=sorted({r["rho_cls"] for r in ep}),
-                        crashes=sum(flag(r["crashed"]) for r in ep), CR_total=sum(flag(r["crashed"]) for r in ep) / len(ep),
-                        CR_total_valid=(sum(flag(r["crashed"]) for r in valid) / n) if n else None,
+        crashes = sum(parse_bool(r["crashed"], "crashed") for r in ep)
+        crashes_valid = sum(parse_bool(r["crashed"], "crashed") for r in valid)
+        out.append(dict(mode=mode, D=D, rho=_rho_str(rho), unit=unit, n=len(ep), n_valid=n, events=x,
+                        rho_cls=sorted({str(r["rho_cls"]).strip() for r in ep}),
+                        crashes=crashes, CR_total=crashes / len(ep),
+                        CR_total_valid=(crashes_valid / n) if n else None,
                         share=(x / n) if n else None, upper=B.cp_upper(x, n) if n else None,
                         lower=B.cp_lower(x, n) if n else None, decision=B.h1_decision(x, n)))
     return out
 
 
 def h1_summary(checks):
-    a = [c for c in checks if c["mode"] in "AB" and float(c["rho"]) in H1_RHOS]
-    b = [c for c in checks if c["mode"] == "B2"]
+    arms = set(SPEC.h1a_arms)
+    h1_rhos = {round(float(r), 6) for r in H1_RHOS}
+    a = [c for c in checks
+         if normalize_mode(c["mode"]) in arms and parse_rho(c.get("rho")) in h1_rhos]
+    b = [c for c in checks if normalize_mode(c["mode"]) == SPEC.b2_arm]
     return dict(H1a=dict(checks=len(a), confirmed=sum(c["decision"] == B.CONFIRMED for c in a),
                          exceeded=sum(c["decision"] == B.EXCEEDED for c in a),
                          outcome="confirmed" if a and all(c["decision"] == B.CONFIRMED for c in a) else "not confirmed"),
@@ -69,18 +98,23 @@ def h1_difference(rows, n_boot, rng):
     starts, with the two-way cluster bootstrap that keeps the shared episode_seed.  Baseline 2
     events are the ones classified at the reference rho; extra Baseline 2 scenarios are excluded
     from the pair and reported."""
+    diff_rows = select_h1_diff_rows(rows, SPEC)
+
     def events(mode, D, rho=None):
         g = {}
-        for r in rows:
-            if r["mode"] == mode and float(r["D"]) == D and (rho is None or float(r["rho"]) == rho) \
-                    and flag(r["correct_start"]):
-                g.setdefault(r["unit"], {})[int(r["episode_seed"])] = int(flag(r["h1_event"]))
+        for r in diff_rows:
+            if (normalize_mode(r["mode"]) == mode and float(r["D"]) == D
+                    and (rho is None or parse_rho(r.get("rho")) == rho)
+                    and parse_bool(r["correct_start"], "correct_start")):
+                g.setdefault(str(r["unit"]).strip(), {})[int(float(r["episode_seed"]))] = int(
+                    parse_bool(r["h1_event"], "h1_event"))
         return g
+
     out = []
-    for D in sorted({float(r["D"]) for r in rows}):
-        base = events("B2", D)
+    for D in sorted({float(r["D"]) for r in diff_rows}):
+        base = events(SPEC.b2_arm, D)
         for rho in H1_RHOS:
-            prop = events("B", D, rho)
+            prop = events("B", D, round(float(rho), 6))
             if prop and base:
                 b = B.bootstrap_h1_diff_twoway(prop, base, n_boot=n_boot,
                                                seed=int(rng.integers(2**31 - 1)))
@@ -89,6 +123,43 @@ def h1_difference(rows, n_boot, rng):
                                                               b["n_units_baseline2"]),
                                 n_common_scenarios=b["n_common_scenarios"],
                                 n_extra_b2_excluded=b["n_extra_b2_excluded"]))
+    return out
+
+
+def descriptive_cells(rows, spec=SPEC):
+    """Descriptive cell summary across every valid arm and rho level present in the table,
+    including descriptive rho in {0.1, 0.2} s and boundary rho = 0.4 s."""
+    desc_rows = select_descriptive_rows(rows, spec)
+    groups = {}
+    for r in desc_rows:
+        mode = normalize_mode(r["mode"])
+        D = float(r["D"])
+        rho = None if mode == spec.b2_arm else parse_rho(r.get("rho"))
+        groups.setdefault((mode, D, rho), []).append(r)
+    ordered = sorted(groups.items(),
+                     key=lambda kv: (kv[0][0], kv[0][1], -1.0 if kv[0][2] is None else kv[0][2]))
+    out = []
+    for (mode, D, rho), ep in ordered:
+        units = {str(r["unit"]).strip() for r in ep}
+        valid = [r for r in ep if parse_bool(r["correct_start"], "correct_start")]
+        n_ep, n_valid = len(ep), len(valid)
+        crashes = sum(parse_bool(r["crashed"], "crashed") for r in ep)
+        h1_events = sum(parse_bool(r["h1_event"], "h1_event") for r in valid)
+        e_sum = float(sum(float(r["E"]) for r in ep))
+        n_exec_sum = float(sum(float(r["N_exec"]) for r in ep))
+        n_blocked_sum = float(sum(float(r["N_blocked"]) for r in ep))
+        n_att_sum = float(sum(float(r["N_att"]) for r in ep))
+        out.append(dict(
+            mode=mode, D=D, rho=_rho_str(rho), role=_rho_role(mode, rho, spec),
+            n_units=len(units), n_episodes=n_ep, n_valid=n_valid,
+            CR_total=(crashes / n_ep) if n_ep else None,
+            CR_ego_op=(h1_events / n_valid) if n_valid else None,
+            v_eff=float(np.mean([float(r["v_eff"]) for r in ep])) if ep else None,
+            N_exec_rate=(n_exec_sum / e_sum) if e_sum > 0 else None,
+            N_blocked_rate=(n_blocked_sum / e_sum) if e_sum > 0 else None,
+            N_att_rate=(n_att_sum / e_sum) if e_sum > 0 else None,
+            BLCR=(n_blocked_sum / n_att_sum) if n_att_sum > 0 else None,
+        ))
     return out
 
 
@@ -124,35 +195,39 @@ def main(argv=None):
         except DesignCompletenessError as exc:
             sys.stderr.write(f"design completeness error: {exc}\n")
             return 2
-    ab = [r for r in rows if r["mode"] in "AB"]
+    desc_rows = select_descriptive_rows(rows, SPEC)
+    h2_rows = select_h2_rows(rows, SPEC)
+    h3_rows = select_h3_rows(rows, SPEC)
     rng = np.random.default_rng(args.seed)
     R = dict(args=vars(args), n_rows=len(rows), design=args.design)
 
-    checks = h1_checks(rows)
+    checks = h1_checks(desc_rows)
     R["h1_checks"], R["h1"] = checks, h1_summary(checks)
     R["h1_difference"] = h1_difference(rows, args.boot_diff, rng)
+    R["descriptive"] = descriptive_cells(desc_rows, SPEC)
 
-    R["excluded"] = dict(E0=sum(float(r["E"]) <= 0 for r in ab), N_att0=sum(float(r["N_att"]) <= 0 for r in ab),
-                         episodes=len(ab))
-    R["primary"] = P.run_primary(ab, args.boot, args.boot_sens, args.seed)
-    R["control"] = P.CONTROL.function(ab, args.boot, np.random.default_rng([args.seed, 50]))
-    R["dispersion"] = dict(N_exec=P.dispersion(ab, "N_exec", P.H2_TERMS, "B"),
-                           N_blocked=P.dispersion(ab, "N_blocked", P.H3_TERMS, "AB"),
-                           N_att=P.dispersion(ab, "N_att", P.H3_TERMS, "AB"),
-                           blocked_share=P.dispersion(ab, "N_blocked", P.H3_TERMS, "AB", trials="N_att"))
-    means, reps = P.bootstrap_cells(ab, "v_eff", args.boot_sens, np.random.default_rng([args.seed, 60]))
+    R["excluded"] = dict(E0=sum(float(r["E"]) <= 0 for r in h3_rows),
+                         N_att0=sum(float(r["N_att"]) <= 0 for r in h3_rows),
+                         episodes=len(h3_rows))
+    R["primary"] = P.run_primary(h3_rows, args.boot, args.boot_sens, args.seed)
+    R["control"] = P.CONTROL.function(h3_rows, args.boot, np.random.default_rng([args.seed, 50]))
+    R["dispersion"] = dict(N_exec=P.dispersion(h2_rows, "N_exec", P.H2_TERMS, "B"),
+                           N_blocked=P.dispersion(h3_rows, "N_blocked", P.H3_TERMS, "AB"),
+                           N_att=P.dispersion(h3_rows, "N_att", P.H3_TERMS, "AB"),
+                           blocked_share=P.dispersion(h3_rows, "N_blocked", P.H3_TERMS, "AB", trials="N_att"))
+    means, reps = P.bootstrap_cells(h2_rows, "v_eff", args.boot_sens, np.random.default_rng([args.seed, 60]))
     con = P.contrast_of_differences(means)
     lo, hi = P.interval([P.contrast_of_differences(m) for m in reps])
     R["contrast"] = dict(estimate=con, lower=lo, upper=hi)
     R["adjacent"], R["page"] = {}, {}
     for outcome in ("v_eff", "N_exec"):
         m0, rp = (means, reps) if outcome == "v_eff" else P.bootstrap_cells(
-            ab, outcome, args.boot_sens, np.random.default_rng([args.seed, 61]))
+            h2_rows, outcome, args.boot_sens, np.random.default_rng([args.seed, 61]))
         adj = P.adjacent_contrasts(m0)
         R["adjacent"][outcome] = {k: dict(estimate=v, interval=P.interval([P.adjacent_contrasts(m)[k] for m in rp]))
                                   for k, v in adj.items()}
         for over in ("rho", "D"):
-            levels, tab = P.trend_table(ab, outcome, over)
+            levels, tab = P.trend_table(h2_rows, outcome, over)
             if tab.size:
                 L, pv, how = P.page_test(tab)
                 R["page"][f"{outcome} over {over}"] = dict(levels=levels, blocks=len(tab), L=L, p=pv, method=how)
@@ -180,7 +255,8 @@ def main(argv=None):
          f"({R['h1']['H1a']['confirmed']} confirmed, {R['h1']['H1a']['exceeded']} exceeded). "
          f"H1b (IUT over the {R['h1']['H1b']['checks']} Baseline 2 checks): **{R['h1']['H1b']['outcome']}** "
          f"({R['h1']['H1b']['exceeded']} exceeded, {R['h1']['H1b']['confirmed']} confirmed). "
-         "Checks with rho = 0.4 are the boundary level: descriptive, outside the decision.", "",
+         "Checks with rho = 0.4 are the boundary level and checks with rho in {0.1; 0.2} violate rho >= tau_eff: "
+         "both are descriptive and outside the H1a decision.", "",
          "Descriptive difference CR_ego_op(Proposed, mode B) − CR_ego_op(Baseline 2) on the common "
          "correct-start scenarios, two-factor cluster bootstrap (shared scenario multiplicities):", "",
          table(["D", "rho", "difference", "lower 95 %", "upper 95 %", "common scenarios",
@@ -188,10 +264,21 @@ def main(argv=None):
                [[d["D"], d["rho"], d["difference"], d["lower"], d["upper"], d["n_common_scenarios"],
                  d["n_extra_b2_excluded"], f"{d['policies'][0]}, {d['policies'][1]}"]
                 for d in R["h1_difference"]]), "",
+         "## Descriptive cell summary (all rho levels)", "",
+         "All present arms and rho levels (including descriptive rho in {0.1; 0.2} s and boundary rho = 0.4 s). "
+         "Descriptive levels rho in {0.1; 0.2} s are reported here and in the H1 table above, and excluded from "
+         "primary H1a IUT, H2/H3 models, control M5, sensitivity, dispersion, contrasts and Page's test.", "",
+         table(["arm", "D", "rho", "role", "units", "episodes", "n_valid", "CR_total", "CR_ego_op",
+                "v_eff", "N_exec/E", "N_blocked/E", "N_att/E", "BLCR"],
+               [[d["mode"], d["D"], d["rho"] or "—", d["role"], d["n_units"], d["n_episodes"], d["n_valid"],
+                 d["CR_total"], d["CR_ego_op"], d["v_eff"], d["N_exec_rate"], d["N_blocked_rate"],
+                 d["N_att_rate"], d["BLCR"]] for d in R["descriptive"]]), "",
          "## H2 / H3: seven primary checks", "",
-         "Covariates: Dc = (D − 25) / 10, rhoc = rho − 2/3 (grid means), mode = 1 for mode B. One-sided p: "
-         "parametric bootstrap of the signed likelihood root under the null model; Holm over the seven checks in "
-         "each analysis; sensitivity: two-way cluster bootstrap that keeps shared scenario ids.", "",
+         "Selected rows: rho in {0.4; 0.6; 1.0} s (mode B for H2, modes A and B for H3 and M5; descriptive "
+         "rho in {0.1; 0.2} s excluded). Covariates: Dc = (D − 25) / 10, rhoc = rho − 2/3 (grid means), "
+         "mode = 1 for mode B. One-sided p: parametric bootstrap of the signed likelihood root under the null "
+         "model; Holm over the seven checks in each analysis; sensitivity: two-way cluster bootstrap that keeps "
+         "shared scenario ids.", "",
          table(["check", "function", "model", "estimate", "SE", "signed root", "p (bootstrap)",
                 "B / B_conv", "stationary share", "p Holm", "converged (via)", "sens. estimate", "sens. 95 % interval",
                 "sens. p", "sens. p Holm", "outcome"],

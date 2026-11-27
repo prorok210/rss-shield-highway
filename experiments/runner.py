@@ -129,7 +129,7 @@ def rear_contact(ego, road):
 
 def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=False, explore=False,
                 seed=None, reset=None, episode=0, journal=None, steps_log=None, shield_cfg=None,
-                classify=False):
+                classify=False, on_step=None):
     """One episode. agent: object with q_values(obs), rng, epsilon() (a DQN for training).
     shield_on=False: Baseline (no filter, every step is a policy step with the full action set).
     explore: epsilon-greedy over A_safe - a random preference vector is passed to the shield, so the
@@ -138,7 +138,10 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
     journal / steps_log: lists that receive one row per decision step.
     shield_cfg: ShieldConfig keyword arguments besides rho (default MAIN_SERIES).
     classify: record the physics frames and give a collision its operational category (7.7) at
-    the classification rho of the arm (experiments.h1); needed for the H1 event of the episode."""
+    the classification rho of the arm (experiments.h1); needed for the H1 event of the episode.
+    on_step: optional callable `on_step(episode_step)` invoked after each decision step (and after
+    `agent.on_env_step()` when `train=True`, outside the `t_learn` timing bracket) with the 1-based
+    step count completed in this episode; used for exact-step validation checkpoints."""
     obs, _ = reset() if reset is not None else env.reset(seed=seed)
     ego = env.vehicle
     cfg = dict(MAIN_SERIES if shield_cfg is None else shield_cfg)
@@ -280,6 +283,8 @@ def run_episode(env, agent, rho=0.6, shield_on=True, reward_kind="Rv", train=Fal
             c["t_learn"] += t5 - t4
             k += 1
             obs = obs2
+            if on_step is not None:
+                on_step(k)
     finally:
         if frames is not None:
             frames.close()
